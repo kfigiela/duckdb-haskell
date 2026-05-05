@@ -66,6 +66,8 @@ import Foreign.Ptr (Ptr, castPtr, nullPtr)
 import Foreign.Storable (poke)
 import Numeric.Natural (Natural)
 import qualified Data.Aeson.Types as Aeson
+import qualified Data.Aeson.Text as Aeson
+import qualified Data.Text.Lazy as LText
 
 -- | Represents a named parameter binding using the @:=@ operator.
 data NamedParam where
@@ -164,6 +166,13 @@ instance ToField BS.ByteString where
     toField bs =
         valueBinding
             ("<blob length=" <> show (BS.length bs) <> ">")
+            (toDuckValue bs)
+
+
+instance ToField Aeson.Value where
+    toField bs =
+        valueBinding
+            "<json>"
             (toDuckValue bs)
 
 instance (DuckDBColumnType a, ToDuckValue a) => ToField (Array Int a) where
@@ -799,6 +808,9 @@ instance ToDuckValue (UnionValue FieldValue) where
 instance (ToDuckValue a) => ToDuckValue (Maybe a) where
     toDuckValue Nothing = nullDuckValue
     toDuckValue (Just value) = toDuckValue value
+
+instance ToDuckValue Aeson.Value where
+    toDuckValue = textDuckValue . LText.toStrict . Aeson.encodeToLazyText
 
 encodeDay :: Day -> IO DuckDBDate
 encodeDay day =
