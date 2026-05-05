@@ -333,7 +333,7 @@ instance (Ord k, DuckValue k, DuckValue v) => DuckValue (Map.Map k v) where
             pure (k, v)
     duckFromField other = Left ("duckdb-simple: expected MAP, got " <> show other)
 
-instance (Generic a, GToField (Rep a), GFromField (Rep a), Show a) => DuckValue (ViaDuckDB a) where
+instance (Generic a, GToField (Rep a), GFromField (Rep a)) => DuckValue (ViaDuckDB a) where
   duckToField (ViaDuckDB x)=
         case genericToUnionValue x of
             Just unionVal -> FieldUnion unionVal
