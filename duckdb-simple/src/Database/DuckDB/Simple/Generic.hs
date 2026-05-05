@@ -11,6 +11,7 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE OverloadedStrings #-}
 
 {- |
 Module      : Database.DuckDB.Simple.Generic
@@ -131,6 +132,10 @@ import Database.DuckDB.Simple.LogicalRep (
  )
 import Database.DuckDB.Simple.Ok (Ok (..))
 import Database.DuckDB.Simple.ToField (DuckDBColumnType (..), ToField (..))
+import Data.List.NonEmpty (NonEmpty)
+import qualified Data.List.NonEmpty as NE
+import qualified Data.Aeson.Text as Aeson
+import qualified Data.Text.Lazy as T
 
 --------------------------------------------------------------------------------
 -- DuckValue: bridge between Haskell scalars and FieldValue/LogicalTypeRep
@@ -282,10 +287,7 @@ instance (DuckValue a) => DuckValue (NonEmpty a) where
 
 instance DuckValue Aeson.Value where
   duckToField = FieldText . T.toStrict . Aeson.encodeToLazyText
-  duckFromField (FieldText txt) = first ("duckdb-simple: Could not parse JSON: " <>) $ Aeson.eitherDecode $ BS.fromStrict $ encodeUtf8 txt
-  duckFromField (FieldBlob bs) = first ("duckdb-simple: Could not parse JSON: " <>) $ Aeson.eitherDecode $ BS.fromStrict bs -- DuckDB JSON is represented as VARCHAR on the wire, but this is also technically correct
-  duckFromField other = Left ("duckdb-simple: Expected JSON, VARCHAR or BLOB, got " <> show other)
-  duckLogicalType _ = LogicalTypeScalar DuckDBTypeVarchar -- Matches DuckDB JSON type representation
+  duckLogicalType _ = LogicalTypeJSON -- Special case, this is an alias for VARCHAR
 
 {- | Array values encode as DuckDB ARRAY (fixed-length).
 Note: Arrays must have consistent bounds to work correctly with DuckDB.
@@ -692,16 +694,22 @@ logical type and map it back to a textual name.  The textual names are only
 used for diagnostics (errors and column metadata).
 -}
 instance (Generic a, GToField (Rep a)) => DuckDBColumnType (ViaDuckDB a) where
-    duckdbColumnTypeFor _ =
-        case genericLogicalType (Proxy :: Proxy a) of
-            LogicalTypeStruct{} -> Text.pack "STRUCT"
-            LogicalTypeUnion{} -> Text.pack "UNION"
-            LogicalTypeList{} -> Text.pack "LIST"
-            LogicalTypeArray{} -> Text.pack "ARRAY"
-            LogicalTypeMap{} -> Text.pack "MAP"
-            LogicalTypeScalar dtype -> duckdbTypeToName dtype
-            LogicalTypeDecimal{} -> Text.pack "DECIMAL"
-            LogicalTypeEnum{} -> Text.pack "ENUM"
+    duckdbColumnTypeFor _ = renderLogicalType $ genericLogicalType (Proxy :: Proxy a)
+
+renderLogicalType :: LogicalTypeRep -> Text
+renderLogicalType = \case
+ LogicalTypeScalar d -> duckdbTypeToName d
+ LogicalTypeJSON -> "JSON"
+ LogicalTypeStruct ary ->  let fields = Array.elems ary in "STRUCT(" <> Text.intercalate ", " [structFieldName <> " " <> renderLogicalType structFieldValue | StructField{structFieldName, structFieldValue} <- fields] <>  ")"
+ LogicalTypeList chld -> "" <> renderLogicalType chld  <>  "[]"
+ LogicalTypeArray chld num -> "" <> renderLogicalType chld  <>  "[" <> Text.pack (show num) <> "]"
+ LogicalTypeUnion ary ->  let fields = Array.elems ary in "UNION(" <> Text.intercalate ", " [unionMemberName <> " " <> renderLogicalType unionMemberType | UnionMemberType{unionMemberName, unionMemberType} <- fields] <>  ")"
+ LogicalTypeEnum ary ->
+        let opts = Array.elems ary
+            quote opt = "'" <> opt <> "'" -- FIXME: implement proper quoting
+        in "ENUM(" <> Text.intercalate ", " (fmap quote opts) <>  ")"
+ LogicalTypeDecimal a b -> "DECIMAL(" <> Text.pack (show a) <> ", " <> Text.pack (show b) <> ")"
+ LogicalTypeMap k v -> "MAP(" <> renderLogicalType k <> ", " <> renderLogicalType v <> ")"
 
 {- | Deriving-via @ToField@ instance. We reuse the helpers above to decide
 whether the top-level representation is a union, struct, or scalar and then

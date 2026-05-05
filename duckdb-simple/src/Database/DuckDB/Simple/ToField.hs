@@ -65,6 +65,7 @@ import Foreign.Marshal.Array (withArray)
 import Foreign.Ptr (Ptr, castPtr, nullPtr)
 import Foreign.Storable (poke)
 import Numeric.Natural (Natural)
+import qualified Data.Aeson.Types as Aeson
 
 -- | Represents a named parameter binding using the @:=@ operator.
 data NamedParam where
@@ -259,6 +260,9 @@ instance DuckDBColumnType (StructValue FieldValue) where
 
 instance DuckDBColumnType (UnionValue FieldValue) where
     duckdbColumnTypeFor _ = "UNION"
+
+instance DuckDBColumnType Aeson.Value where
+    duckdbColumnTypeFor _ = "JSON"
 
 instance (DuckDBColumnType a) => DuckDBColumnType (Maybe a) where
     duckdbColumnTypeFor _ = duckdbColumnTypeFor (Proxy :: Proxy a)
@@ -465,6 +469,7 @@ fieldValueWithTypeDuckValue _ FieldNull = nullDuckValue
 fieldValueWithTypeDuckValue rep value =
     case rep of
         LogicalTypeScalar dtype -> scalarFieldValueDuckValue dtype value
+        LogicalTypeJSON -> scalarFieldValueDuckValue DuckDBTypeVarchar value
         LogicalTypeDecimal width scale ->
             case value of
                 FieldDecimal decVal@DecimalValue{decimalWidth, decimalScale}

@@ -69,6 +69,11 @@ import Database.DuckDB.Simple.Ok
 import Database.DuckDB.Simple.Types (Null (..))
 import GHC.Num.Integer (integerFromWordList)
 import Numeric.Natural (Natural)
+import Data.List.NonEmpty (NonEmpty)
+import qualified Data.List.NonEmpty as NE
+import qualified Data.Aeson as Aeson
+import qualified Data.Text as T
+import Data.Text.Encoding (encodeUtf8)
 
 -- | Internal representation of a column value.
 data FieldValue
@@ -583,6 +588,9 @@ instance {-# OVERLAPPABLE #-} (Typeable a, FromField a) => FromField [a] where
                 idxText = Text.pack (show idx)
              in base <> Text.pack "[" <> idxText <> Text.pack "]"
 
+instance {-# OVERLAPPABLE #-} (Typeable a, FromField a) => FromField (NonEmpty a) where
+    fromField f = fromField f >>= maybe (returnError ConversionFailed f "Expected non-empty list") pure . NE.nonEmpty
+
 instance (Typeable a, FromField a) => FromField (Array Int a) where
     fromField f@Field{fieldValue} =
         case fieldValue of
@@ -692,6 +700,14 @@ instance FromField UTCTime where
 instance (FromField a) => FromField (Maybe a) where
     fromField Field{fieldValue = FieldNull} = Ok Nothing
     fromField field = Just <$> fromField field
+
+instance FromField Aeson.Value where
+  fromField f@Field{fieldValue} =
+   case fieldValue of
+    FieldText txt -> either (returnError Incompatible f . ("duckdb-simple: Could not parse JSON: " <>) . T.pack) Ok $ Aeson.eitherDecode $ BS.fromStrict $ encodeUtf8 txt
+    -- while VARCHAR is effectively type alias for JSON, BLOB would still be reasonable choice
+    FieldBlob bs -> either (returnError Incompatible f . ("duckdb-simple: Could not parse JSON: " <>) . T.pack) Ok $ Aeson.eitherDecode $ BS.fromStrict bs
+    _ -> returnError Incompatible f ""
 
 -- | Helper for bounded integral conversions.
 boundedIntegral :: forall a. (Integral a, Bounded a, Typeable a) => Field -> Int -> Ok a

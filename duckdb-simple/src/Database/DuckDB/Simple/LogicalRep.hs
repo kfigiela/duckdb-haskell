@@ -45,6 +45,7 @@ data LogicalTypeRep
     | LogicalTypeStruct !(Array Int (StructField LogicalTypeRep))
     | LogicalTypeUnion !(Array Int UnionMemberType)
     | LogicalTypeEnum !(Array Int Text)
+    | LogicalTypeJSON -- Ugly! VARCHAR on the wire, but this is a builtin type alias with special handling
     deriving (Eq, Show)
 
 -- | A named field within a STRUCT-like value or type.
@@ -182,6 +183,8 @@ logicalTypeFromRep :: LogicalTypeRep -> IO DuckDBLogicalType
 logicalTypeFromRep = \case
     LogicalTypeScalar dtype ->
         c_duckdb_create_logical_type dtype
+    LogicalTypeJSON ->
+        c_duckdb_create_logical_type DuckDBTypeVarchar
     LogicalTypeDecimal width scale ->
         c_duckdb_create_decimal_type width scale
     LogicalTypeList elemRep ->
