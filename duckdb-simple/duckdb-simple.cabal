@@ -37,6 +37,7 @@ source-repository head
 library
   exposed-modules:
     Database.DuckDB.Simple
+    Database.DuckDB.Simple.Appender
     Database.DuckDB.Simple.Catalog
     Database.DuckDB.Simple.Config
     Database.DuckDB.Simple.Copy
