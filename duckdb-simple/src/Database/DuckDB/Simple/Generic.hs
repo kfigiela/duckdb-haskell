@@ -820,7 +820,7 @@ class ToTable (a :: Type) where
     default toTableFields :: (Generic a, GToTable (Rep a)) => Proxy a -> [StructField LogicalTypeRep]
     toTableFields _ = gtoTableFields (Proxy @(Rep a))
 
-    toTableRowValues :: a -> IO [DuckDBValue]
+    toTableRowValues :: a ->IO [DuckDBValue]
     default toTableRowValues :: (Generic a, GToTable (Rep a)) => a -> IO [DuckDBValue]
     toTableRowValues = gtoTableRowValues . from
 
@@ -833,13 +833,13 @@ instance GToTable U1 where
     gtoTableFields _ = []
     gtoTableRowValues _ = pure []
 
-instance (DuckValue a, ToDuckValue a, KnownSymbol selectorName) => GToTable (S1 ('MetaSel ('Just selectorName) q w e)(K1 i a)) where
+instance (DuckValue a, KnownSymbol selectorName) => GToTable (S1 ('MetaSel ('Just selectorName) q w e)(K1 i a)) where
     gtoTableFields _ = [StructField ( Text.pack $ symbolVal (Proxy @selectorName)) (duckLogicalType (Proxy @a))]
-    gtoTableRowValues (M1 (K1 v)) = pure <$> toDuckValue v
+    gtoTableRowValues (M1 (K1 v)) = pure <$> fieldValueWithTypeDuckValue (duckLogicalType (Proxy @a)) (duckToField v)
 
 instance (GToTable a, GToTable b) => GToTable (a :*: b) where
     gtoTableFields _ = gtoTableFields (Proxy @a) ++ gtoTableFields (Proxy @b)
-    gtoTableRowValues (a :*: b) = mconcat <$> sequence [gtoTableRowValues a, gtoTableRowValues b]
+    gtoTableRowValues (a :*: b) = gtoTableRowValues a <> gtoTableRowValues b
 
 instance (GToTable a) => GToTable (M1 C c a) where
     gtoTableFields _ = gtoTableFields (Proxy @a)
