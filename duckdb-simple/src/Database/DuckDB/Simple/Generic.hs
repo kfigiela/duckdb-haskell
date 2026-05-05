@@ -96,6 +96,7 @@ module Database.DuckDB.Simple.Generic (
 import Control.Exception (displayException)
 import Control.Monad (unless)
 import Data.Array (Array, elems, listArray)
+import qualified Data.Aeson as Aeson
 import qualified Data.ByteString as BS
 import Data.Int (Int16, Int32, Int64, Int8)
 import qualified Data.Map.Strict as Map
@@ -271,6 +272,20 @@ instance (DuckValue a) => DuckValue [a] where
     duckLogicalType _ = LogicalTypeList (duckLogicalType (Proxy :: Proxy a))
     duckFromField (FieldList fvs) = traverse duckFromField fvs
     duckFromField other = Left ("duckdb-simple: expected LIST, got " <> show other)
+
+-- | NonEmpty list values encode as DuckDB LIST (variable-length).
+instance (DuckValue a) => DuckValue (NonEmpty a) where
+    duckToField xs = FieldList (map duckToField $ NE.toList xs)
+    duckLogicalType _ = LogicalTypeList (duckLogicalType (Proxy :: Proxy a))
+    duckFromField (FieldList fvs) = maybe (Left "duckdb-simple: expected non empty list, 0 elements found") (traverse duckFromField) $ NE.nonEmpty fvs
+    duckFromField other = Left ("duckdb-simple: expected LIST, got " <> show other)
+
+instance DuckValue Aeson.Value where
+  duckToField = FieldText . T.toStrict . Aeson.encodeToLazyText
+  duckFromField (FieldText txt) = first ("duckdb-simple: Could not parse JSON: " <>) $ Aeson.eitherDecode $ BS.fromStrict $ encodeUtf8 txt
+  duckFromField (FieldBlob bs) = first ("duckdb-simple: Could not parse JSON: " <>) $ Aeson.eitherDecode $ BS.fromStrict bs -- DuckDB JSON is represented as VARCHAR on the wire, but this is also technically correct
+  duckFromField other = Left ("duckdb-simple: Expected JSON, VARCHAR or BLOB, got " <> show other)
+  duckLogicalType _ = LogicalTypeScalar DuckDBTypeVarchar -- Matches DuckDB JSON type representation
 
 {- | Array values encode as DuckDB ARRAY (fixed-length).
 Note: Arrays must have consistent bounds to work correctly with DuckDB.
