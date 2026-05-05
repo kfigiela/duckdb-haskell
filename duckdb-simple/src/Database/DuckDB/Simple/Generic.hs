@@ -333,6 +333,21 @@ instance (Ord k, DuckValue k, DuckValue v) => DuckValue (Map.Map k v) where
             pure (k, v)
     duckFromField other = Left ("duckdb-simple: expected MAP, got " <> show other)
 
+instance (Generic a, GToField (Rep a), GFromField (Rep a), Show a) => DuckValue (ViaDuckDB a) where
+  duckToField (ViaDuckDB x)=
+        case genericToUnionValue x of
+            Just unionVal -> FieldUnion unionVal
+            Nothing ->
+                case genericToStructValue x of
+                    Just structVal -> FieldStruct structVal
+                    Nothing -> genericToFieldValue x
+  duckFromField fieldValue =
+    case genericFromFieldValue fieldValue of
+        Right value -> pure (ViaDuckDB value)
+        Left err -> Left err
+  duckLogicalType _ = genericLogicalType (Proxy @a)
+
+
 --------------------------------------------------------------------------------
 -- Generic machinery
 
