@@ -22,6 +22,7 @@ module Database.DuckDB.Simple.ToField (
     duckdbColumnType,
     bindFieldBinding,
     renderFieldBinding,
+    fieldValueWithTypeDuckValue
 ) where
 
 import Control.Exception (bracket, throwIO)

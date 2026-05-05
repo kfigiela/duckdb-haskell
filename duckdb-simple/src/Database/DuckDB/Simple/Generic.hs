@@ -134,7 +134,7 @@ import Database.DuckDB.Simple.LogicalRep (
     UnionValue (..),
  )
 import Database.DuckDB.Simple.Ok (Ok (..))
-import Database.DuckDB.Simple.ToField (DuckDBColumnType (..), ToField (..))
+import Database.DuckDB.Simple.ToField (DuckDBColumnType (..), ToField (..), ToDuckValue (toDuckValue), fieldValueWithTypeDuckValue)
 import Data.List.NonEmpty (NonEmpty)
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Aeson.Text as Aeson
@@ -833,9 +833,9 @@ instance GToTable U1 where
     gtoTableFields _ = []
     gtoTableRowValues _ = pure []
 
-instance (DuckValue a, ToField a, KnownSymbol selectorName) => GToTable (S1 ('MetaSel ('Just selectorName) q w e)(K1 i a)) where
+instance (DuckValue a, ToDuckValue a, KnownSymbol selectorName) => GToTable (S1 ('MetaSel ('Just selectorName) q w e)(K1 i a)) where
     gtoTableFields _ = [StructField ( Text.pack $ symbolVal (Proxy @selectorName)) (duckLogicalType (Proxy @a))]
-    gtoTableRowValues (M1 (K1 v)) = pure <$> toFieldValue v
+    gtoTableRowValues (M1 (K1 v)) = pure <$> toDuckValue v
 
 instance (GToTable a, GToTable b) => GToTable (a :*: b) where
     gtoTableFields _ = gtoTableFields (Proxy @a) ++ gtoTableFields (Proxy @b)
@@ -848,3 +848,15 @@ instance (GToTable a) => GToTable (M1 C c a) where
 instance (GToTable a) => GToTable (M1 D c a) where
     gtoTableFields _ = gtoTableFields (Proxy @a)
     gtoTableRowValues (M1 a) =  gtoTableRowValues a
+
+---
+
+
+instance (Generic a, GToField (Rep a), GFromField (Rep a)) => ToDuckValue (ViaDuckDB a) where
+  toDuckValue (ViaDuckDB x)=
+        case genericToUnionValue x of
+            Just unionVal -> toDuckValue unionVal
+            Nothing ->
+                case genericToStructValue x of
+                    Just structVal -> toDuckValue structVal
+                    Nothing -> fieldValueWithTypeDuckValue (genericLogicalType (Proxy @a)) (genericToFieldValue x)
