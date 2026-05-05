@@ -65,5 +65,6 @@ withAppenderAcquire acquire action =
         app <- peek appPtr
         let release = do
               destroyState <- c_duckdb_appender_destroy appPtr
-              when (destroyState  /= DuckDBSuccess) $ throwIO (userError "duckdb-simple: could not release appender")
+              pure ()
+            --   when (destroyState  /= DuckDBSuccess) $ throwIO (userError "duckdb-simple: could not release appender")
         action app `finally` release

@@ -12,6 +12,7 @@
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TypeApplications #-}
 
 {- |
 Module      : Database.DuckDB.Simple.Generic
@@ -92,6 +93,8 @@ module Database.DuckDB.Simple.Generic (
 
     -- * DerivingVia helper
     ViaDuckDB (..),
+    ToTable(..),
+    tableSchema,
 ) where
 
 import Control.Exception (displayException)
@@ -136,6 +139,9 @@ import Data.List.NonEmpty (NonEmpty)
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Aeson.Text as Aeson
 import qualified Data.Text.Lazy as T
+import qualified Data.Array as Array
+import Data.Kind (Type)
+import GHC.TypeLits (symbolVal, KnownSymbol)
 
 --------------------------------------------------------------------------------
 -- DuckValue: bridge between Haskell scalars and FieldValue/LogicalTypeRep
@@ -728,6 +734,18 @@ instance (Generic a, GToField (Rep a)) => ToField (ViaDuckDB a) where
                             FieldStruct sv -> toField sv
                             FieldNull -> toField (Nothing :: Maybe Int)
                             other -> error ("duckdb-simple: unsupported generic encoding " <> show other)
+    toFieldValue (ViaDuckDB x ) =
+        case genericToUnionValue x of
+            Just unionVal -> toFieldValue unionVal
+            Nothing ->
+                case genericToStructValue x of
+                    Just structVal -> toFieldValue structVal
+                    Nothing ->
+                        case genericToFieldValue x of
+                            FieldUnion uv -> toFieldValue uv
+                            FieldStruct sv -> toFieldValue sv
+                            FieldNull -> toFieldValue (Nothing :: Maybe Int)
+                            other -> error ("duckdb-simple: unsupported generic encoding " <> show other)
 
 {- | Deriving-via @FromField@ instance. Errors are rewrapped using the existing
 @returnError@ helper so callers receive a proper @ResultError@.
@@ -761,16 +779,57 @@ duckdbTypeToName dtype
     | dtype == DuckDBTypeDate = Text.pack "DATE"
     | dtype == DuckDBTypeTime = Text.pack "TIME"
     | dtype == DuckDBTypeTimestamp = Text.pack "TIMESTAMP"
-    | dtype == DuckDBTypeTimestampTz = Text.pack "TIMESTAMP_TZ"
+    | dtype == DuckDBTypeTimestampTz = Text.pack "TIMESTAMPTZ"
     | dtype == DuckDBTypeUUID = Text.pack "UUID"
     | dtype == DuckDBTypeInterval = Text.pack "INTERVAL"
     | dtype == DuckDBTypeHugeInt = Text.pack "HUGEINT"
     | dtype == DuckDBTypeUHugeInt = Text.pack "UHUGEINT"
     | dtype == DuckDBTypeBigNum = Text.pack "BIGNUM"
-    | dtype == DuckDBTypeTimeTz = Text.pack "TIME_TZ"
+    | dtype == DuckDBTypeTimeTz = Text.pack "TIMETZ"
     | otherwise = Text.pack (show dtype)
 
 --------------------------------------------------------------------------------
 -- DuckDB type constructors (re-exported patterns)
 
 -- These pattern synonyms come from duckdb-ffi; re-exporting to avoid users having to import it.
+
+---
+
+
+tableSchema :: ToTable a => Proxy a -> Text
+tableSchema pxy = Text.intercalate ", " [structFieldName <> " " <> renderLogicalType structFieldValue | StructField{structFieldName, structFieldValue} <- toTableFields pxy]
+
+-- | Types that can be transformed into parameter bindings.
+class ToTable (a :: Type) where
+    toTableFields :: Proxy a -> [StructField LogicalTypeRep]
+    default toTableFields :: (Generic a, GToTable (Rep a)) => Proxy a -> [StructField LogicalTypeRep]
+    toTableFields _ = gtoTableFields (Proxy @(Rep a))
+
+    toTableRowValues :: a -> IO [DuckDBValue]
+    default toTableRowValues :: (Generic a, GToTable (Rep a)) => a -> IO [DuckDBValue]
+    toTableRowValues = gtoTableRowValues . from
+
+-- -- | Generic helper for deriving `ToTable`.
+class GToTable (f :: Type -> Type) where
+    gtoTableFields :: Proxy f -> [StructField LogicalTypeRep]
+    gtoTableRowValues :: f b -> IO [DuckDBValue]
+
+instance GToTable U1 where
+    gtoTableFields _ = []
+    gtoTableRowValues _ = pure []
+
+instance (DuckValue a, ToField a, KnownSymbol selectorName) => GToTable (S1 ('MetaSel ('Just selectorName) q w e)(K1 i a)) where
+    gtoTableFields _ = [StructField ( Text.pack $ symbolVal (Proxy @selectorName)) (duckLogicalType (Proxy @a))]
+    gtoTableRowValues (M1 (K1 v)) = pure <$> toFieldValue v
+
+instance (GToTable a, GToTable b) => GToTable (a :*: b) where
+    gtoTableFields _ = gtoTableFields (Proxy @a) ++ gtoTableFields (Proxy @b)
+    gtoTableRowValues (a :*: b) = mconcat <$> sequence [gtoTableRowValues a, gtoTableRowValues b]
+
+instance (GToTable a) => GToTable (M1 C c a) where
+    gtoTableFields _ = gtoTableFields (Proxy @a)
+    gtoTableRowValues (M1 a) =  gtoTableRowValues a
+
+instance (GToTable a) => GToTable (M1 D c a) where
+    gtoTableFields _ = gtoTableFields (Proxy @a)
+    gtoTableRowValues (M1 a) =  gtoTableRowValues a

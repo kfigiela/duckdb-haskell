@@ -119,9 +119,14 @@ class ToField a where
     toField :: a -> FieldBinding
     default toField :: (Show a, ToDuckValue a) => a -> FieldBinding
     toField value = valueBinding (show value) (toDuckValue value)
+    toFieldValue :: a -> IO DuckDBValue
+    default toFieldValue :: (Show a, ToDuckValue a) => a -> IO DuckDBValue
+    toFieldValue = toDuckValue
+
 
 instance ToField Null where
     toField Null = nullBinding "NULL"
+    toFieldValue Null = nullDuckValue
 
 instance ToField Bool
 instance ToField Int
@@ -153,11 +158,13 @@ instance ToField BigNum where
 instance ToField (StructValue FieldValue) where
     toField structVal =
         valueBinding "<struct>" (structValueDuckValue structVal)
+    toFieldValue = structValueDuckValue
 
 instance ToField (UnionValue FieldValue) where
     toField unionVal =
         let label = Text.unpack (unionValueLabel unionVal)
          in valueBinding ("<union " <> label <> ">") (unionValueDuckValue unionVal)
+    toFieldValue = unionValueDuckValue
 
 instance DuckDBColumnType BitString where
     duckdbColumnTypeFor _ = "BIT"
@@ -180,6 +187,7 @@ instance (DuckDBColumnType a, ToDuckValue a) => ToField (Array Int a) where
         valueBinding
             ("<array length=" <> show (length (elems arr)) <> ">")
             (arrayDuckValue arr)
+    toFieldValue = arrayDuckValue
 
 instance (ToField a) => ToField (Maybe a) where
     toField Nothing = nullBinding "Nothing"
@@ -188,6 +196,7 @@ instance (ToField a) => ToField (Maybe a) where
          in binding
                 { fieldBindingDisplay = "Just " <> renderFieldBinding binding
                 }
+    toFieldValue = maybe nullDuckValue toFieldValue
 
 instance DuckDBColumnType Null where
     duckdbColumnTypeFor _ = "NULL"
