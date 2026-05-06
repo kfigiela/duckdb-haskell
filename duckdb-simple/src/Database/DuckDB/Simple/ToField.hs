@@ -22,7 +22,9 @@ module Database.DuckDB.Simple.ToField (
     duckdbColumnType,
     bindFieldBinding,
     renderFieldBinding,
-    fieldValueWithTypeDuckValue
+    fieldValueWithTypeDuckValue,
+    structValueDuckValue,
+    unionValueDuckValue,
 ) where
 
 import Control.Exception (bracket, throwIO)
@@ -274,20 +276,11 @@ instance DuckDBColumnType LocalTime where
 instance DuckDBColumnType UTCTime where
     duckdbColumnTypeFor _ = "TIMESTAMPTZ"
 
-instance DuckDBColumnType (StructValue FieldValue) where
-    duckdbColumnTypeFor _ = "STRUCT"
-
-instance DuckDBColumnType (UnionValue FieldValue) where
-    duckdbColumnTypeFor _ = "UNION"
-
 instance DuckDBColumnType Aeson.Value where
     duckdbColumnTypeFor _ = "JSON"
 
 instance (DuckDBColumnType a) => DuckDBColumnType (Maybe a) where
     duckdbColumnTypeFor _ = duckdbColumnTypeFor (Proxy :: Proxy a)
-
-instance (DuckDBColumnType a) => DuckDBColumnType (Array Int a) where
-    duckdbColumnTypeFor _ = duckdbColumnTypeFor (Proxy :: Proxy a) <> Text.pack "[]"
 
 nullBinding :: String -> FieldBinding
 nullBinding repr = valueBinding repr nullDuckValue
@@ -808,12 +801,6 @@ instance ToDuckValue LocalTime where
 
 instance ToDuckValue UTCTime where
     toDuckValue = utcTimeDuckValue
-
-instance ToDuckValue (StructValue FieldValue) where
-    toDuckValue = structValueDuckValue
-
-instance ToDuckValue (UnionValue FieldValue) where
-    toDuckValue = unionValueDuckValue
 
 instance (ToDuckValue a) => ToDuckValue (Maybe a) where
     toDuckValue Nothing = nullDuckValue
