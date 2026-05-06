@@ -13,6 +13,7 @@
 {-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeApplications #-}
+{-# OPTIONS_GHC -Wno-orphans #-}
 
 {- |
 Module      : Database.DuckDB.Simple.Generic
@@ -130,16 +131,17 @@ import Database.DuckDB.Simple.LogicalRep (
     StructField (..),
     StructValue (..),
     UnionMemberType (..),
-    UnionValue (..),
+    UnionValue (..), logicalTypeFromRep,
  )
 import Database.DuckDB.Simple.Ok (Ok (..))
-import Database.DuckDB.Simple.ToField (DuckDBColumnType (..), ToField (..), ToDuckValue (toDuckValue), unionValueDuckValue, structValueDuckValue, fieldValueWithTypeDuckValue)
+import Database.DuckDB.Simple.ToField (DuckDBColumnType (..), ToField (..), ToDuckValue (toDuckValue), unionValueDuckValue, structValueDuckValue, fieldValueWithTypeDuckValue, withDuckValues)
 import Data.List.NonEmpty (NonEmpty)
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Aeson.Text as Aeson
 import qualified Data.Text.Lazy as T
 import qualified Data.Array as Array
-
+import Data.Map (Map)
+import Database.DuckDB.Simple.Internal
 --------------------------------------------------------------------------------
 -- DuckValue: bridge between Haskell scalars and FieldValue/LogicalTypeRep
 
@@ -813,3 +815,24 @@ instance (Generic a, GToField (Rep a), GFromField (Rep a)) => ToDuckValue (ViaDu
                 case genericToStructValue x of
                     Just structVal -> structValueDuckValue structVal
                     Nothing -> fieldValueWithTypeDuckValue (genericLogicalType (Proxy @a)) (genericToFieldValue x)
+
+
+
+instance (Ord k, ToDuckValue k, ToDuckValue v, DuckValue k, DuckValue v) => ToDuckValue (Map k v) where
+  toDuckValue m= do
+    let keyRep = duckLogicalType (Proxy @k)
+    let valueRep = duckLogicalType (Proxy @v)
+    let pairs = Map.toList m
+
+    let count = length pairs
+    keyValues <- mapM (toDuckValue . fst) pairs
+    valValues <- mapM (toDuckValue . snd) pairs
+    mapLogical <- logicalTypeFromRep (LogicalTypeMap keyRep valueRep)
+    result <-
+        withDuckValues keyValues $ \keyPtr ->
+            withDuckValues valValues $ \valPtr ->
+                c_duckdb_create_map_value mapLogical keyPtr valPtr (fromIntegral count)
+    mapM_ destroyValue keyValues
+    mapM_ destroyValue valValues
+    destroyLogicalType mapLogical
+    pure result

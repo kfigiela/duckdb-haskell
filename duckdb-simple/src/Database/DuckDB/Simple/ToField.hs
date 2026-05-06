@@ -5,6 +5,7 @@
 {-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TypeApplications #-}
 
 {- |
 Module      : Database.DuckDB.Simple.ToField
@@ -25,6 +26,7 @@ module Database.DuckDB.Simple.ToField (
     fieldValueWithTypeDuckValue,
     structValueDuckValue,
     unionValueDuckValue,
+    withDuckValues
 ) where
 
 import Control.Exception (bracket, throwIO)
@@ -71,6 +73,7 @@ import Numeric.Natural (Natural)
 import qualified Data.Aeson.Types as Aeson
 import qualified Data.Aeson.Text as Aeson
 import qualified Data.Text.Lazy as LText
+import Data.Map (Map)
 
 -- | Represents a named parameter binding using the @:=@ operator.
 data NamedParam where
@@ -281,6 +284,10 @@ instance DuckDBColumnType Aeson.Value where
 
 instance (DuckDBColumnType a) => DuckDBColumnType (Maybe a) where
     duckdbColumnTypeFor _ = duckdbColumnTypeFor (Proxy :: Proxy a)
+
+instance (DuckDBColumnType a, DuckDBColumnType b) => DuckDBColumnType (Map a b) where
+    duckdbColumnTypeFor _ = "MAP(" <> duckdbColumnTypeFor (Proxy :: Proxy a) <> ", " <> duckdbColumnTypeFor (Proxy :: Proxy b) <> ")"
+
 
 nullBinding :: String -> FieldBinding
 nullBinding repr = valueBinding repr nullDuckValue
