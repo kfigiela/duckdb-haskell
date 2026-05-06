@@ -143,8 +143,6 @@ import qualified Data.Text.Lazy as T
 import qualified Data.Array as Array
 import Data.Kind (Type)
 import GHC.TypeLits (symbolVal, KnownSymbol)
-import Type.Reflection (typeRep)
-import qualified Data.Char as Char
 
 --------------------------------------------------------------------------------
 -- DuckValue: bridge between Haskell scalars and FieldValue/LogicalTypeRep
@@ -336,7 +334,7 @@ instance (Ord k, DuckValue k, DuckValue v) => DuckValue (Map.Map k v) where
             pure (k, v)
     duckFromField other = Left ("duckdb-simple: expected MAP, got " <> show other)
 
-instance (Generic a, GToField (Rep a), GFromField (Rep a), Typeable a) => DuckValue (ViaDuckDB a) where
+instance (Generic a, GToField (Rep a), GFromField (Rep a)) => DuckValue (ViaDuckDB a) where
   duckToField (ViaDuckDB x)=
         case genericToUnionValue x of
             Just unionVal -> FieldUnion unionVal
@@ -348,7 +346,7 @@ instance (Generic a, GToField (Rep a), GFromField (Rep a), Typeable a) => DuckVa
     case genericFromFieldValue fieldValue of
         Right value -> pure (ViaDuckDB value)
         Left err -> Left err
-  duckLogicalType _ = LogicalTypeAlias (Text.filter (\c -> Char.isAlphaNum c && c /= ' ') $ Text.pack $ show (typeRep @a)) $ genericLogicalType (Proxy @a)
+  duckLogicalType _ = genericLogicalType (Proxy @a)
 
 
 --------------------------------------------------------------------------------
@@ -724,32 +722,16 @@ renderLogicalType :: LogicalTypeRep -> Text
 renderLogicalType = \case
  LogicalTypeScalar d -> duckdbTypeToName d
  LogicalTypeJSON -> "JSON"
- LogicalTypeStruct ary ->  let fields = Array.elems ary in "STRUCT(" <> Text.intercalate ", " [structFieldName <> " " <> renderLogicalType aliases  structFieldValue | StructField{structFieldName, structFieldValue} <- fields] <>  ")"
- LogicalTypeList chld -> "" <> renderLogicalType  aliases chld  <>  "[]"
- LogicalTypeArray chld num -> "" <> renderLogicalType  aliases chld  <>  "[" <> Text.pack (show num) <> "]"
- LogicalTypeUnion ary ->  let fields = Array.elems ary in "UNION(" <> Text.intercalate ", " [unionMemberName <> " " <> renderLogicalType  aliases unionMemberType | UnionMemberType{unionMemberName, unionMemberType} <- fields] <>  ")"
+ LogicalTypeStruct ary ->  let fields = Array.elems ary in "STRUCT(" <> Text.intercalate ", " [structFieldName <> " " <> renderLogicalType   structFieldValue | StructField{structFieldName, structFieldValue} <- fields] <>  ")"
+ LogicalTypeList chld -> "" <> renderLogicalType   chld  <>  "[]"
+ LogicalTypeArray chld num -> "" <> renderLogicalType   chld  <>  "[" <> Text.pack (show num) <> "]"
+ LogicalTypeUnion ary ->  let fields = Array.elems ary in "UNION(" <> Text.intercalate ", " [unionMemberName <> " " <> renderLogicalType   unionMemberType | UnionMemberType{unionMemberName, unionMemberType} <- fields] <>  ")"
  LogicalTypeEnum ary ->
         let opts = Array.elems ary
             quote opt = "'" <> opt <> "'" -- FIXME: implement proper quoting
         in "ENUM(" <> Text.intercalate ", " (fmap quote opts) <>  ")"
  LogicalTypeDecimal a b -> "DECIMAL(" <> Text.pack (show a) <> ", " <> Text.pack (show b) <> ")"
- LogicalTypeMap k v -> "MAP(" <> renderLogicalType aliases  k <> ", " <> renderLogicalType aliases  v <> ")"
-
-collectTypes' :: (Generic a, GToField (Rep a)) => Proxy a -> [(Text, LogicalTypeRep)]
-collectTypes' = collectTypes . genericLogicalType
-
-collectTypes :: LogicalTypeRep -> [(Text, LogicalTypeRep)]
-collectTypes = \case
- LogicalTypeScalar _ -> []
- LogicalTypeJSON -> []
- LogicalTypeAlias alias val -> (alias, val):collectTypes val
- LogicalTypeStruct ary -> concatMap collectTypes [structFieldValue | StructField{ structFieldValue} <- Array.elems ary]
- LogicalTypeList chld -> collectTypes chld
- LogicalTypeArray chld _num -> collectTypes chld
- LogicalTypeUnion ary -> concatMap collectTypes [unionMemberType | UnionMemberType{ unionMemberType} <- Array.elems ary]
- LogicalTypeEnum {} -> []
- LogicalTypeDecimal {} -> []
- LogicalTypeMap k v -> collectTypes k <> collectTypes v
+ LogicalTypeMap k v -> "MAP(" <> renderLogicalType   k <> ", " <> renderLogicalType   v <> ")"
 
 {- | Deriving-via @ToField@ instance. We reuse the helpers above to decide
 whether the top-level representation is a union, struct, or scalar and then
@@ -831,7 +813,7 @@ duckdbTypeToName dtype
 
 
 tableSchema :: ToTable a => Proxy a -> Text
-tableSchema pxy = Text.intercalate ", " [structFieldName <> " " <> renderLogicalType UseAlias structFieldValue | StructField{structFieldName, structFieldValue} <- toTableFields pxy]
+tableSchema pxy = Text.intercalate ", " [structFieldName <> " " <> renderLogicalType structFieldValue | StructField{structFieldName, structFieldValue} <- toTableFields pxy]
 
 -- | Types that can be transformed into parameter bindings.
 class ToTable (a :: Type) where
