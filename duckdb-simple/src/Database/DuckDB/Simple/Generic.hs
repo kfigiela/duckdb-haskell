@@ -93,8 +93,6 @@ module Database.DuckDB.Simple.Generic (
 
     -- * DerivingVia helper
     ViaDuckDB (..),
-    ToTable(..),
-    tableSchema,
     renderLogicalType,
 ) where
 
@@ -135,14 +133,12 @@ import Database.DuckDB.Simple.LogicalRep (
     UnionValue (..),
  )
 import Database.DuckDB.Simple.Ok (Ok (..))
-import Database.DuckDB.Simple.ToField (DuckDBColumnType (..), ToField (..), ToDuckValue (toDuckValue), fieldValueWithTypeDuckValue, structValueDuckValue, unionValueDuckValue)
+import Database.DuckDB.Simple.ToField (DuckDBColumnType (..), ToField (..), ToDuckValue (toDuckValue), unionValueDuckValue, structValueDuckValue, fieldValueWithTypeDuckValue)
 import Data.List.NonEmpty (NonEmpty)
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Aeson.Text as Aeson
 import qualified Data.Text.Lazy as T
 import qualified Data.Array as Array
-import Data.Kind (Type)
-import GHC.TypeLits (symbolVal, KnownSymbol)
 
 --------------------------------------------------------------------------------
 -- DuckValue: bridge between Haskell scalars and FieldValue/LogicalTypeRep
@@ -808,50 +804,6 @@ duckdbTypeToName dtype
 -- DuckDB type constructors (re-exported patterns)
 
 -- These pattern synonyms come from duckdb-ffi; re-exporting to avoid users having to import it.
-
----
-
-
-tableSchema :: ToTable a => Proxy a -> Text
-tableSchema pxy = Text.intercalate ", " [structFieldName <> " " <> renderLogicalType structFieldValue | StructField{structFieldName, structFieldValue} <- toTableFields pxy]
-
--- | Types that can be transformed into parameter bindings.
-class ToTable (a :: Type) where
-    toTableFields :: Proxy a -> [StructField LogicalTypeRep]
-    default toTableFields :: (Generic a, GToTable (Rep a)) => Proxy a -> [StructField LogicalTypeRep]
-    toTableFields _ = gtoTableFields (Proxy @(Rep a))
-
-    toTableRowValues :: a ->IO [DuckDBValue]
-    default toTableRowValues :: (Generic a, GToTable (Rep a)) => a -> IO [DuckDBValue]
-    toTableRowValues = gtoTableRowValues . from
-
--- -- | Generic helper for deriving `ToTable`.
-class GToTable (f :: Type -> Type) where
-    gtoTableFields :: Proxy f -> [StructField LogicalTypeRep]
-    gtoTableRowValues :: f b -> IO [DuckDBValue]
-
-instance GToTable U1 where
-    gtoTableFields _ = []
-    gtoTableRowValues _ = pure []
-
-instance (DuckValue a, KnownSymbol selectorName) => GToTable (S1 ('MetaSel ('Just selectorName) q w e)(K1 i a)) where
-    gtoTableFields _ = [StructField ( Text.pack $ symbolVal (Proxy @selectorName)) (duckLogicalType (Proxy @a))]
-    gtoTableRowValues (M1 (K1 v)) = pure <$> fieldValueWithTypeDuckValue (duckLogicalType (Proxy @a)) (duckToField v)
-
-instance (GToTable a, GToTable b) => GToTable (a :*: b) where
-    gtoTableFields _ = gtoTableFields (Proxy @a) ++ gtoTableFields (Proxy @b)
-    gtoTableRowValues (a :*: b) = gtoTableRowValues a <> gtoTableRowValues b
-
-instance (GToTable a) => GToTable (M1 C c a) where
-    gtoTableFields _ = gtoTableFields (Proxy @a)
-    gtoTableRowValues (M1 a) =  gtoTableRowValues a
-
-instance (GToTable a) => GToTable (M1 D c a) where
-    gtoTableFields _ = gtoTableFields (Proxy @a)
-    gtoTableRowValues (M1 a) =  gtoTableRowValues a
-
----
-
 
 instance (Generic a, GToField (Rep a), GFromField (Rep a)) => ToDuckValue (ViaDuckDB a) where
   toDuckValue (ViaDuckDB x)=
