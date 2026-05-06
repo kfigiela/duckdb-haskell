@@ -107,10 +107,10 @@ appendTableRow app row = do
 --
 
 createTableQuery :: ToAppenderRow a => Text -> Proxy a -> Query
-createTableQuery nme pxy = Query $ "CREATE TABLE " <> nme <> " (" <> tableSchema pxy <> ")" -- FIXME: unsafe
+createTableQuery nme pxy = Query $ "CREATE TABLE \"" <> nme <> "\" (" <> tableSchema pxy <> ")" -- FIXME: unsafe
 
 tableSchema :: ToAppenderRow a => Proxy a -> Text
-tableSchema pxy = Text.intercalate ", " [structFieldName <> " " <> renderLogicalType structFieldValue | StructField{structFieldName, structFieldValue} <- toTableFields pxy]
+tableSchema pxy = Text.intercalate ", " ["\"" <> structFieldName <> "\" " <> renderLogicalType structFieldValue | StructField{structFieldName, structFieldValue} <- toTableFields pxy]
 
 -- | Types that can be transformed into parameter bindings.
 class ToAppenderRow (a :: Type) where
