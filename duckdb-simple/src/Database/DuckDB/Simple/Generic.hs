@@ -842,8 +842,16 @@ instance (Ord k, ToDuckValue k, ToDuckValue v, DuckValue k, DuckValue v) => ToDu
 
 newtype ViaJSON a = ViaJSON {getViaJSON :: a}
 
-instance Aeson.ToJSON a => ToDuckValue (ViaJSON a) where
-    toDuckValue (ViaJSON v) = toDuckValue . Aeson.toJSON $ v
 
+instance Aeson.ToJSON a => ToDuckValue (ViaJSON a) where
+    toDuckValue (ViaJSON v) = toDuckValue (Aeson.toJSON v)
 instance DuckDBColumnType (ViaJSON a) where
     duckdbColumnTypeFor _ = duckdbColumnTypeFor (Proxy @Aeson.Value)
+
+instance (Show (ViaJSON a), Aeson.ToJSON a, Aeson.FromJSON (ViaJSON a)) => DuckValue  (ViaJSON a) where
+    duckToField (ViaJSON v) = duckToField . Aeson.toJSON $ v
+    duckFromField fv = case Aeson.fromJSON <$> duckFromField fv  of
+        Right (Aeson.Success v) -> pure v
+        Right (Aeson.Error err) -> Left err
+        Left err -> Left err
+    duckLogicalType _ = duckLogicalType (Proxy @Aeson.Value)
