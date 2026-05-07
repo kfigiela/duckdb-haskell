@@ -143,6 +143,9 @@ import qualified Data.Text.Lazy as T
 import qualified Data.Array as Array
 import Data.Map (Map)
 import Database.DuckDB.Simple.Internal
+import Data.Set (Set)
+import qualified Data.Set as Set
+import Data.Bifunctor (second)
 --------------------------------------------------------------------------------
 -- DuckValue: bridge between Haskell scalars and FieldValue/LogicalTypeRep
 
@@ -290,6 +293,11 @@ instance (DuckValue a) => DuckValue (NonEmpty a) where
     duckLogicalType _ = LogicalTypeList (duckLogicalType (Proxy :: Proxy a))
     duckFromField (FieldList fvs) = maybe (Left "duckdb-simple: expected non empty list, 0 elements found") (traverse duckFromField) $ NE.nonEmpty fvs
     duckFromField other = Left ("duckdb-simple: expected LIST, got " <> show other)
+
+instance (DuckValue a, Ord a) => DuckValue (Set a) where
+    duckToField = duckToField . Set.toList
+    duckFromField = second Set.fromList . duckFromField
+    duckLogicalType _ = duckLogicalType $ Proxy @[a]
 
 instance DuckValue Aeson.Value where
   duckToField = FieldText . T.toStrict . Aeson.encodeToLazyText
@@ -722,10 +730,10 @@ renderLogicalType :: LogicalTypeRep -> Text
 renderLogicalType = \case
  LogicalTypeScalar d -> duckdbTypeToName d
  LogicalTypeJSON -> "JSON"
- LogicalTypeStruct ary ->  let fields = Array.elems ary in "STRUCT(" <> Text.intercalate ", " [structFieldName <> " " <> renderLogicalType   structFieldValue | StructField{structFieldName, structFieldValue} <- fields] <>  ")"
+ LogicalTypeStruct ary ->  let fields = Array.elems ary in "STRUCT(" <> Text.intercalate ", " ["\"" <> structFieldName <> "\" " <> renderLogicalType   structFieldValue | StructField{structFieldName, structFieldValue} <- fields] <>  ")"
  LogicalTypeList chld -> "" <> renderLogicalType   chld  <>  "[]"
  LogicalTypeArray chld num -> "" <> renderLogicalType   chld  <>  "[" <> Text.pack (show num) <> "]"
- LogicalTypeUnion ary ->  let fields = Array.elems ary in "UNION(" <> Text.intercalate ", " [unionMemberName <> " " <> renderLogicalType   unionMemberType | UnionMemberType{unionMemberName, unionMemberType} <- fields] <>  ")"
+ LogicalTypeUnion ary ->  let fields = Array.elems ary in "UNION(" <> Text.intercalate ", " ["\"" <> unionMemberName <> "\" " <> renderLogicalType   unionMemberType | UnionMemberType{unionMemberName, unionMemberType} <- fields] <>  ")"
  LogicalTypeEnum ary ->
         let opts = Array.elems ary
             quote opt = "'" <> opt <> "'" -- FIXME: implement proper quoting
