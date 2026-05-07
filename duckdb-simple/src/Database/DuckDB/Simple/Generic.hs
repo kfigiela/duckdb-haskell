@@ -94,6 +94,7 @@ module Database.DuckDB.Simple.Generic (
 
     -- * DerivingVia helper
     ViaDuckDB (..),
+    ViaJSON(..),
     renderLogicalType,
 ) where
 
@@ -836,3 +837,13 @@ instance (Ord k, ToDuckValue k, ToDuckValue v, DuckValue k, DuckValue v) => ToDu
     mapM_ destroyValue valValues
     destroyLogicalType mapLogical
     pure result
+
+---
+
+newtype ViaJSON a = ViaJSON {getViaJSON :: a}
+
+instance Aeson.ToJSON a => ToDuckValue (ViaJSON a) where
+    toDuckValue (ViaJSON v) = toDuckValue . Aeson.toJSON $ v
+
+instance DuckDBColumnType (ViaJSON a) where
+    duckdbColumnTypeFor _ = duckdbColumnTypeFor (Proxy @Aeson.Value)
