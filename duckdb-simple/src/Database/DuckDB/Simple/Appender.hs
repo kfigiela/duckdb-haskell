@@ -10,7 +10,6 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE InstanceSigs #-}
 
 {- |
 Module      : Database.DuckDB.Simple.Appender
@@ -41,11 +40,10 @@ import Data.Data (Proxy (Proxy))
 import Data.Kind (Type)
 import Database.DuckDB.Simple.LogicalRep (StructField (StructField, structFieldName, structFieldValue), LogicalTypeRep)
 import GHC.Generics
-import Database.DuckDB.Simple.Generic (renderLogicalType)
+import Database.DuckDB.Simple.Generic (renderLogicalType, DuckValue (duckLogicalType, duckToField))
 import GHC.TypeLits (KnownSymbol, symbolVal)
 import qualified Data.Text as Text
-import Database.DuckDB.Simple ( duckLogicalType)
-import Database.DuckDB.Simple.ToField (DuckDBColumnType, ToDuckValue (toDuckValue))
+import Database.DuckDB.Simple.ToField (fieldValueWithTypeDuckValue)
 
 type TableName = Text
 
@@ -132,9 +130,9 @@ instance GToAppenderRow U1 where
     gtoAppenderSchema _ = []
     gtoAppenderValues _ = pure []
 
-instance (DuckDBColumnType a, ToDuckValue a, KnownSymbol selectorName) => GToAppenderRow (S1 ('MetaSel ('Just selectorName) q w e)(K1 i a)) where
+instance (DuckValue a, KnownSymbol selectorName) => GToAppenderRow (S1 ('MetaSel ('Just selectorName) q w e)(K1 i a)) where
     gtoAppenderSchema _ = [StructField ( Text.pack $ symbolVal (Proxy @selectorName)) (duckLogicalType (Proxy @a))]
-    gtoAppenderValues (M1 (K1 v)) = pure <$> toDuckValue v
+    gtoAppenderValues (M1 (K1 v)) = pure <$> fieldValueWithTypeDuckValue (duckLogicalType (Proxy @a)) (duckToField v)
 
 instance (GToAppenderRow a, GToAppenderRow b) => GToAppenderRow (a :*: b) where
     gtoAppenderSchema _ = gtoAppenderSchema (Proxy @a) ++ gtoAppenderSchema (Proxy @b)

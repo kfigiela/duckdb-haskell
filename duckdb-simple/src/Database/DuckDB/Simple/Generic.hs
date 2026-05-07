@@ -143,7 +143,6 @@ import qualified Data.Text.Lazy as T
 import qualified Data.Array as Array
 import Data.Map (Map)
 import Database.DuckDB.Simple.Internal
-import Data.Kind (Type)
 --------------------------------------------------------------------------------
 -- DuckValue: bridge between Haskell scalars and FieldValue/LogicalTypeRep
 
@@ -162,6 +161,7 @@ should be represented; both the generic implementation and the manual
 class DuckValue a where
     duckToField :: a -> FieldValue
     duckFromField :: FieldValue -> Either String a
+    duckLogicalType :: Proxy a -> LogicalTypeRep
 
     default duckFromField :: (FromField a, Show a) => FieldValue -> Either String a
     duckFromField fv =
@@ -171,100 +171,129 @@ class DuckValue a where
 
 instance DuckValue Bool where
     duckToField = FieldBool
+    duckLogicalType _ = LogicalTypeScalar DuckDBTypeBoolean
 
 instance DuckValue Int where
     duckToField = FieldInt64 . fromIntegral
+    duckLogicalType _ = LogicalTypeScalar DuckDBTypeBigInt
 
 instance DuckValue Int8 where
     duckToField = FieldInt8
+    duckLogicalType _ = LogicalTypeScalar DuckDBTypeTinyInt
 
 instance DuckValue Int16 where
     duckToField = FieldInt16
+    duckLogicalType _ = LogicalTypeScalar DuckDBTypeSmallInt
 
 instance DuckValue Int32 where
     duckToField = FieldInt32
+    duckLogicalType _ = LogicalTypeScalar DuckDBTypeInteger
 
 instance DuckValue Int64 where
     duckToField = FieldInt64
+    duckLogicalType _ = LogicalTypeScalar DuckDBTypeBigInt
 
 instance DuckValue Integer where
     duckToField = FieldHugeInt
+    duckLogicalType _ = LogicalTypeScalar DuckDBTypeHugeInt
 
 instance DuckValue Natural where
     duckToField = FieldUHugeInt . toInteger
+    duckLogicalType _ = LogicalTypeScalar DuckDBTypeUHugeInt
 
 instance DuckValue Word where
     duckToField = FieldWord64 . fromIntegral
+    duckLogicalType _ = LogicalTypeScalar DuckDBTypeUBigInt
 
 instance DuckValue Word8 where
     duckToField = FieldWord8
+    duckLogicalType _ = LogicalTypeScalar DuckDBTypeUTinyInt
 
 instance DuckValue Word16 where
     duckToField = FieldWord16
+    duckLogicalType _ = LogicalTypeScalar DuckDBTypeUSmallInt
 
 instance DuckValue Word32 where
     duckToField = FieldWord32
+    duckLogicalType _ = LogicalTypeScalar DuckDBTypeUInteger
 
 instance DuckValue Word64 where
     duckToField = FieldWord64
+    duckLogicalType _ = LogicalTypeScalar DuckDBTypeUBigInt
 
 instance DuckValue Float where
     duckToField = FieldFloat
+    duckLogicalType _ = LogicalTypeScalar DuckDBTypeFloat
 
 instance DuckValue Double where
     duckToField = FieldDouble
+    duckLogicalType _ = LogicalTypeScalar DuckDBTypeDouble
 
 instance DuckValue Text where
     duckToField = FieldText
+    duckLogicalType _ = LogicalTypeScalar DuckDBTypeVarchar
 
 instance DuckValue String where
     duckToField = FieldText . Text.pack
+    duckLogicalType _ = LogicalTypeScalar DuckDBTypeVarchar
     duckFromField fv = Text.unpack <$> duckFromField fv
 
 instance DuckValue BS.ByteString where
     duckToField = FieldBlob
+    duckLogicalType _ = LogicalTypeScalar DuckDBTypeBlob
 
 instance DuckValue Day where
     duckToField = FieldDate
+    duckLogicalType _ = LogicalTypeScalar DuckDBTypeDate
 
 instance DuckValue TimeOfDay where
     duckToField = FieldTime
+    duckLogicalType _ = LogicalTypeScalar DuckDBTypeTime
 
 instance DuckValue LocalTime where
     duckToField = FieldTimestamp
+    duckLogicalType _ = LogicalTypeScalar DuckDBTypeTimestamp
 
 instance DuckValue UTCTime where
     duckToField = FieldTimestampTZ
+    duckLogicalType _ = LogicalTypeScalar DuckDBTypeTimestampTz
 
 instance DuckValue UUID.UUID where
     duckToField = FieldUUID
+    duckLogicalType _ = LogicalTypeScalar DuckDBTypeUUID
 
 instance DuckValue IntervalValue where
     duckToField = FieldInterval
+    duckLogicalType _ = LogicalTypeScalar DuckDBTypeInterval
 
 instance DuckValue TimeWithZone where
     duckToField = FieldTimeTZ
+    duckLogicalType _ = LogicalTypeScalar DuckDBTypeTimeTz
 
 instance (DuckValue a) => DuckValue (Maybe a) where
     duckToField (Just x) = duckToField x
     duckToField Nothing = FieldNull
+    duckLogicalType _ = duckLogicalType (Proxy :: Proxy a)
     duckFromField FieldNull = Right Nothing
     duckFromField other = Just <$> duckFromField other
 
 -- | List values encode as DuckDB LIST (variable-length).
 instance (DuckValue a) => DuckValue [a] where
     duckToField xs = FieldList (map duckToField xs)
+    duckLogicalType _ = LogicalTypeList (duckLogicalType (Proxy :: Proxy a))
     duckFromField (FieldList fvs) = traverse duckFromField fvs
     duckFromField other = Left ("duckdb-simple: expected LIST, got " <> show other)
 
 -- | NonEmpty list values encode as DuckDB LIST (variable-length).
 instance (DuckValue a) => DuckValue (NonEmpty a) where
     duckToField xs = FieldList (map duckToField $ NE.toList xs)
+    duckLogicalType _ = LogicalTypeList (duckLogicalType (Proxy :: Proxy a))
     duckFromField (FieldList fvs) = maybe (Left "duckdb-simple: expected non empty list, 0 elements found") (traverse duckFromField) $ NE.nonEmpty fvs
     duckFromField other = Left ("duckdb-simple: expected LIST, got " <> show other)
 
 instance DuckValue Aeson.Value where
   duckToField = FieldText . T.toStrict . Aeson.encodeToLazyText
+  duckLogicalType _ = LogicalTypeJSON -- Special case, this is an alias for VARCHAR
 
 {- | Array values encode as DuckDB ARRAY (fixed-length).
 Note: Arrays must have consistent bounds to work correctly with DuckDB.
@@ -274,6 +303,10 @@ instance (DuckValue a) => DuckValue (Array Int a) where
         let values = elems arr
             (low, high) = (0, length values - 1)
          in FieldArray (listArray (low, high) (map duckToField values))
+    duckLogicalType _ =
+        -- We can't determine array size at the type level, so this is approximate.
+        -- The actual size will be determined at runtime from the array bounds.
+        LogicalTypeArray (duckLogicalType (Proxy :: Proxy a)) 0
     duckFromField (FieldArray arr) = do
         let values = elems arr
         decoded <- traverse duckFromField values
@@ -286,6 +319,10 @@ instance (Ord k, DuckValue k, DuckValue v) => DuckValue (Map.Map k v) where
     duckToField m =
         let pairs = Map.toList m
          in FieldMap [(duckToField k, duckToField v) | (k, v) <- pairs]
+    duckLogicalType _ =
+        LogicalTypeMap
+            (duckLogicalType (Proxy :: Proxy k))
+            (duckLogicalType (Proxy :: Proxy v))
     duckFromField (FieldMap pairs) = do
         decodedPairs <- traverse decodePair pairs
         pure (Map.fromList decodedPairs)
@@ -308,6 +345,7 @@ instance (Generic a, GToField (Rep a), GFromField (Rep a)) => DuckValue (ViaDuck
     case genericFromFieldValue fieldValue of
         Right value -> pure (ViaDuckDB value)
         Left err -> Left err
+  duckLogicalType _ = genericLogicalType (Proxy @a)
 
 
 --------------------------------------------------------------------------------
@@ -334,7 +372,7 @@ genericToFieldValue :: forall a. (Generic a, GToField (Rep a)) => a -> FieldValu
 genericToFieldValue = encodedValue . gToField . from
 
 -- | Extract the logical DuckDB type corresponding to a Haskell value.
-genericLogicalType :: forall a. (Generic a, GLogicalType (Rep a)) => Proxy a -> LogicalTypeRep
+genericLogicalType :: forall a. (Generic a, GToField (Rep a)) => Proxy a -> LogicalTypeRep
 genericLogicalType _ = gLogicalType (Proxy :: Proxy (Rep a ()))
 
 -- | Decode a DuckDB @FieldValue@ back into a Haskell value using its generic representation.
@@ -384,12 +422,10 @@ instance must also supply the corresponding logical type description.
 -}
 class GToField f where
     gToField :: f p -> Encoded
-class GLogicalType f where
     gLogicalType :: Proxy (f p) -> LogicalTypeRep
 
 instance (GToField' (IsSum f) f) => GToField f where
     gToField = gToField' (Proxy :: Proxy (IsSum f))
-instance (GLogicalType' (IsSum f) f) => GLogicalType f where
     gLogicalType _ = gLogicalType' (Proxy :: Proxy (IsSum f)) (Proxy :: Proxy f)
 
 {- | Helper class that splits the product and sum handling using the @IsSum@
@@ -398,13 +434,12 @@ the core logic small and easy to reason about.
 -}
 class GToField' (isSum :: Bool) f where
     gToField' :: Proxy isSum -> f p -> Encoded
-class GLogicalType' (isSum :: Bool) (f :: Type -> Type) where
     gLogicalType' :: Proxy isSum -> Proxy f -> LogicalTypeRep
 
 -- Products (single constructor records)
 
 -- | Product encoding: single-constructor datatypes become STRUCT values.
-instance (GStructType f, GStruct f) => GToField' 'False (M1 D meta (M1 C c f)) where
+instance (GStruct f) => GToField' 'False (M1 D meta (M1 C c f)) where
     gToField' _ (M1 (M1 inner)) =
         let comps = gStructValues inner
             typeComps = gStructTypes (Proxy :: Proxy (f p))
@@ -424,7 +459,6 @@ instance (GStructType f, GStruct f) => GToField' 'False (M1 D meta (M1 C c f)) w
                             typeArray
       where
         progIndices = [0 :: Int ..]
-instance (GStructType f) => GLogicalType' 'False (M1 D meta (M1 C c f)) where
     gLogicalType' _ _ =
         let typeComps = gStructTypes (Proxy :: Proxy (f p))
             names = resolveNames (zip [0 :: Int ..] (map fcName typeComps))
@@ -434,7 +468,7 @@ instance (GStructType f) => GLogicalType' 'False (M1 D meta (M1 C c f)) where
 -- Sums (encode as union)
 
 -- | Sum encoding: multi-constructor datatypes become UNION values.
-instance (GSum f, GSumType f) => GToField' 'True (M1 D meta f) where
+instance (GSum f) => GToField' 'True (M1 D meta f) where
     gToField' _ (M1 value) =
         let members = gSumMembers (Proxy :: Proxy (f p))
             membersArray =
@@ -450,7 +484,6 @@ instance (GSum f, GSumType f) => GToField' 'True (M1 D meta f) where
                     , unionValuePayload = payload
                     , unionValueMembers = membersArray
                     }
-instance (GSumType f) => GLogicalType' 'True (M1 D meta f) where
     gLogicalType' _ _ =
         let members = gSumMembers (Proxy :: Proxy (f p))
             membersArray =
@@ -495,28 +528,20 @@ produce parallel lists so we can zip them during encoding and decoding.
 -}
 class GStruct f where
     gStructValues :: f p -> [FieldComponent FieldValue]
-
-class GStructType f where
     gStructTypes :: Proxy (f p) -> [FieldComponent LogicalTypeRep]
 
 instance GStruct U1 where
     gStructValues _ = []
-
-instance GStructType U1 where
     gStructTypes _ = []
 
 instance (GStruct a, GStruct b) => GStruct (a :*: b) where
     gStructValues (a :*: b) = gStructValues a ++ gStructValues b
-
-instance (GStructType a, GStructType b) => GStructType (a :*: b) where
     gStructTypes _ = gStructTypes (Proxy :: Proxy (a p)) ++ gStructTypes (Proxy :: Proxy (b p))
 
 instance (Selector s, DuckValue a) => GStruct (M1 S s (K1 i a)) where
     gStructValues m@(M1 (K1 x)) =
         let name = toMaybe (selName m)
          in [FieldComponent name (duckToField x)]
-
-instance (Selector s, DuckDBColumnType a) => GStructType (M1 S s (K1 i a)) where
     gStructTypes _ =
         let raw = selName (undefined :: M1 S s (K1 i a) ())
             name = toMaybe raw
@@ -524,8 +549,6 @@ instance (Selector s, DuckDBColumnType a) => GStructType (M1 S s (K1 i a)) where
 
 instance (GStruct f) => GStruct (M1 C c f) where
     gStructValues (M1 x) = gStructValues x
-
-instance (GStructType f) => GStructType (M1 C c f) where
     gStructTypes _ = gStructTypes (Proxy :: Proxy (f p))
 
 toMaybe :: String -> Maybe Text
@@ -540,15 +563,13 @@ toMaybe name
 to its discriminant and payload (@gSumEncode@), and provide the inverse
 (@gSumDecode@).
 -}
-class GSumType f where
-    gSumMembers :: Proxy (f p) -> [UnionMemberType]
 class GSum f where
+    gSumMembers :: Proxy (f p) -> [UnionMemberType]
     gSumEncode :: f p -> (Int, FieldValue)
     gSumDecode :: Int -> FieldValue -> Either String (f p)
 
-instance (GSumType a, GSumType b) => GSumType (a :+: b) where
+instance (GSum a, GSum b) => GSum (a :+: b) where
     gSumMembers _ = gSumMembers (Proxy :: Proxy (a p)) ++ gSumMembers (Proxy :: Proxy (b p))
-instance (GSum a, GSum b, GSumType a, GSumType b) => GSum (a :+: b) where
     gSumEncode (L1 x) = gSumEncode x
     gSumEncode (R1 x) =
         let leftCount = length (gSumMembers (Proxy :: Proxy (a p)))
@@ -560,7 +581,7 @@ instance (GSum a, GSum b, GSumType a, GSumType b) => GSum (a :+: b) where
                 then L1 <$> gSumDecode idx payload
                 else R1 <$> gSumDecode (idx - leftCount) payload
 
-instance (Constructor c, GStructType f, GStructDecode f) => GSumType (M1 C c f) where
+instance (Constructor c, GStruct f, GStructDecode f) => GSum (M1 C c f) where
     gSumMembers _ =
         [ UnionMemberType
             { unionMemberName = Text.pack (conName (undefined :: M1 C c f p))
@@ -570,7 +591,6 @@ instance (Constructor c, GStructType f, GStructDecode f) => GSumType (M1 C c f) 
                  in LogicalTypeStruct (listArrayFrom names (map fcValue typeComps))
             }
         ]
-instance (Constructor c, GStruct f, GStructType f, GStructDecode f) => GSum (M1 C c f) where
     gSumEncode (M1 x) =
         case gStructValues x of
             [] -> (0, FieldNull)
@@ -694,9 +714,9 @@ instance GFromField' 'False (M1 D meta U1) where
 logical type and map it back to a textual name.  The textual names are only
 used for diagnostics (errors and column metadata).
 -}
-instance (Generic a, GLogicalType (Rep a)) => DuckDBColumnType (ViaDuckDB a) where
+instance (Generic a, GToField (Rep a)) => DuckDBColumnType (ViaDuckDB a) where
     duckdbColumnTypeFor _ = renderLogicalType $ genericLogicalType (Proxy :: Proxy a)
-    duckLogicalType _ = genericLogicalType (Proxy @a)
+    duckdbLogicalType _ = genericLogicalType (Proxy :: Proxy a)
 
 renderLogicalType :: LogicalTypeRep -> Text
 renderLogicalType = \case
@@ -777,7 +797,7 @@ duckdbTypeToName dtype
 
 -- These pattern synonyms come from duckdb-ffi; re-exporting to avoid users having to import it.
 
-instance (Generic a, GLogicalType (Rep a), GToField (Rep a)) => ToDuckValue (ViaDuckDB a) where
+instance (Generic a, GToField (Rep a), GFromField (Rep a)) => ToDuckValue (ViaDuckDB a) where
   toDuckValue (ViaDuckDB x)=
         case genericToUnionValue x of
             Just unionVal -> unionValueDuckValue unionVal
@@ -788,7 +808,7 @@ instance (Generic a, GLogicalType (Rep a), GToField (Rep a)) => ToDuckValue (Via
 
 
 
-instance (Ord k, ToDuckValue k, ToDuckValue v, DuckDBColumnType k, DuckDBColumnType v) => ToDuckValue (Map k v) where
+instance (Ord k, ToDuckValue k, ToDuckValue v, DuckValue k, DuckValue v) => ToDuckValue (Map k v) where
   toDuckValue m= do
     let keyRep = duckLogicalType (Proxy @k)
     let valueRep = duckLogicalType (Proxy @v)
@@ -816,7 +836,7 @@ instance Aeson.ToJSON a => ToDuckValue (ViaJSON a) where
     toDuckValue (ViaJSON v) = toDuckValue (Aeson.toJSON v)
 instance DuckDBColumnType (ViaJSON a) where
     duckdbColumnTypeFor _ = duckdbColumnTypeFor (Proxy @Aeson.Value)
-    duckLogicalType _ = duckLogicalType (Proxy @Aeson.Value)
+    duckdbLogicalType _ = duckdbLogicalType (Proxy @Aeson.Value)
 
 instance ( Aeson.ToJSON a, Aeson.FromJSON (ViaJSON a)) => DuckValue  (ViaJSON a) where
     duckToField (ViaJSON v) = duckToField . Aeson.toJSON $ v
@@ -824,3 +844,4 @@ instance ( Aeson.ToJSON a, Aeson.FromJSON (ViaJSON a)) => DuckValue  (ViaJSON a)
         Right (Aeson.Success v) -> pure v
         Right (Aeson.Error err) -> Left err
         Left err -> Left err
+    duckLogicalType _ = duckLogicalType (Proxy @Aeson.Value)

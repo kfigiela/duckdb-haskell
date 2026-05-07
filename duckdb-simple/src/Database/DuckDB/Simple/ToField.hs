@@ -103,7 +103,7 @@ valueBinding display mkValue =
 -- | Types that map to a concrete DuckDB column type when used with @ToField@.
 class DuckDBColumnType a where
     duckdbColumnTypeFor :: Proxy a -> Text
-    duckLogicalType :: Proxy a -> LogicalTypeRep
+    duckdbLogicalType :: Proxy a -> LogicalTypeRep
 
 
 -- | Report the DuckDB column type that best matches a given @ToField@ instance.
@@ -176,7 +176,7 @@ instance ToField (UnionValue FieldValue) where
 
 instance DuckDBColumnType BitString where
     duckdbColumnTypeFor _ = "BIT"
-    duckLogicalType _ = LogicalTypeScalar DuckDBTypeBit
+    duckdbLogicalType _ = LogicalTypeScalar DuckDBTypeBit
 
 instance ToField BS.ByteString where
     toField bs =
@@ -207,155 +207,155 @@ instance (ToField a) => ToField (Maybe a) where
 
 instance DuckDBColumnType Null where
     duckdbColumnTypeFor _ = "NULL"
-    duckLogicalType _ = LogicalTypeScalar DuckDBTypeSQLNull
+    duckdbLogicalType _ = LogicalTypeScalar DuckDBTypeSQLNull
 
 instance DuckDBColumnType Bool where
     duckdbColumnTypeFor _ = "BOOLEAN"
-    duckLogicalType _ = LogicalTypeScalar DuckDBTypeBoolean
+    duckdbLogicalType _ = LogicalTypeScalar DuckDBTypeBoolean
 
 
 instance DuckDBColumnType Int where
     duckdbColumnTypeFor _ = "BIGINT"
-    duckLogicalType _ = LogicalTypeScalar DuckDBTypeBigInt
+    duckdbLogicalType _ = LogicalTypeScalar DuckDBTypeBigInt
 
 
 instance DuckDBColumnType Int8 where
     duckdbColumnTypeFor _ = "TINYINT"
-    duckLogicalType _ = LogicalTypeScalar DuckDBTypeTinyInt
+    duckdbLogicalType _ = LogicalTypeScalar DuckDBTypeTinyInt
 
 
 instance DuckDBColumnType Int16 where
     duckdbColumnTypeFor _ = "SMALLINT"
-    duckLogicalType _ = LogicalTypeScalar DuckDBTypeSmallInt
+    duckdbLogicalType _ = LogicalTypeScalar DuckDBTypeSmallInt
 
 
 instance DuckDBColumnType Int32 where
     duckdbColumnTypeFor _ = "INTEGER"
-    duckLogicalType _ = LogicalTypeScalar DuckDBTypeInteger
+    duckdbLogicalType _ = LogicalTypeScalar DuckDBTypeInteger
 
 instance DuckDBColumnType Int64 where
     duckdbColumnTypeFor _ = "BIGINT"
-    duckLogicalType _ = LogicalTypeScalar DuckDBTypeBigInt
+    duckdbLogicalType _ = LogicalTypeScalar DuckDBTypeBigInt
 
 instance DuckDBColumnType Integer where
     duckdbColumnTypeFor _ = "BIGNUM"
-    duckLogicalType _ = LogicalTypeScalar DuckDBTypeHugeInt
+    duckdbLogicalType _ = LogicalTypeScalar DuckDBTypeHugeInt
 
 instance DuckDBColumnType BigNum where
     duckdbColumnTypeFor _ = "BIGNUM"
-    duckLogicalType _ = LogicalTypeScalar DuckDBTypeHugeInt
+    duckdbLogicalType _ = LogicalTypeScalar DuckDBTypeHugeInt
 
 instance DuckDBColumnType UUID.UUID where
     duckdbColumnTypeFor _ = "UUID"
-    duckLogicalType _ = LogicalTypeScalar DuckDBTypeUUID
+    duckdbLogicalType _ = LogicalTypeScalar DuckDBTypeUUID
 
 
 instance DuckDBColumnType Natural where
     duckdbColumnTypeFor _ = "BIGNUM"
-    duckLogicalType _ = LogicalTypeScalar DuckDBTypeUHugeInt
+    duckdbLogicalType _ = LogicalTypeScalar DuckDBTypeUHugeInt
 
 
 instance DuckDBColumnType Word where
     duckdbColumnTypeFor _ = "UBIGINT"
-    duckLogicalType _ = LogicalTypeScalar DuckDBTypeUBigInt
+    duckdbLogicalType _ = LogicalTypeScalar DuckDBTypeUBigInt
 
 
 instance DuckDBColumnType Word8 where
     duckdbColumnTypeFor _ = "UTINYINT"
-    duckLogicalType _ = LogicalTypeScalar DuckDBTypeUTinyInt
+    duckdbLogicalType _ = LogicalTypeScalar DuckDBTypeUTinyInt
 
 
 instance DuckDBColumnType Word16 where
     duckdbColumnTypeFor _ = "USMALLINT"
-    duckLogicalType _ = LogicalTypeScalar DuckDBTypeUSmallInt
+    duckdbLogicalType _ = LogicalTypeScalar DuckDBTypeUSmallInt
 
 
 instance DuckDBColumnType Word32 where
     duckdbColumnTypeFor _ = "UINTEGER"
-    duckLogicalType _ = LogicalTypeScalar DuckDBTypeUInteger
+    duckdbLogicalType _ = LogicalTypeScalar DuckDBTypeUInteger
 
 
 instance DuckDBColumnType Word64 where
     duckdbColumnTypeFor _ = "UBIGINT"
-    duckLogicalType _ = LogicalTypeScalar DuckDBTypeUBigInt
+    duckdbLogicalType _ = LogicalTypeScalar DuckDBTypeUBigInt
 
 
 instance DuckDBColumnType Double where
     duckdbColumnTypeFor _ = "DOUBLE"
-    duckLogicalType _ = LogicalTypeScalar DuckDBTypeDouble
+    duckdbLogicalType _ = LogicalTypeScalar DuckDBTypeDouble
 
 instance DuckDBColumnType Float where
     duckdbColumnTypeFor _ = "FLOAT"
-    duckLogicalType _ = LogicalTypeScalar DuckDBTypeFloat
+    duckdbLogicalType _ = LogicalTypeScalar DuckDBTypeFloat
 
 instance DuckDBColumnType Text where
     duckdbColumnTypeFor _ = "TEXT"
-    duckLogicalType _ = LogicalTypeScalar DuckDBTypeVarchar
+    duckdbLogicalType _ = LogicalTypeScalar DuckDBTypeVarchar
 
 -- instance DuckDBColumnType String where
     -- duckdbColumnTypeFor _ = "TEXT"
-    -- duckLogicalType _ = LogicalTypeScalar DuckDBTypeVarchar
+    -- duckdbLogicalType _ = LogicalTypeScalar DuckDBTypeVarchar
 
 instance DuckDBColumnType BS.ByteString where
     duckdbColumnTypeFor _ = "BLOB"
-    duckLogicalType _ = LogicalTypeScalar DuckDBTypeBlob
+    duckdbLogicalType _ = LogicalTypeScalar DuckDBTypeBlob
 
 instance DuckDBColumnType Day where
     duckdbColumnTypeFor _ = "DATE"
-    duckLogicalType _ = LogicalTypeScalar DuckDBTypeDate
+    duckdbLogicalType _ = LogicalTypeScalar DuckDBTypeDate
 
 instance DuckDBColumnType TimeOfDay where
     duckdbColumnTypeFor _ = "TIME"
-    duckLogicalType _ = LogicalTypeScalar DuckDBTypeTime
+    duckdbLogicalType _ = LogicalTypeScalar DuckDBTypeTime
 
 instance DuckDBColumnType LocalTime where
     duckdbColumnTypeFor _ = "TIMESTAMP"
-    duckLogicalType _ = LogicalTypeScalar DuckDBTypeTimestamp
+    duckdbLogicalType _ = LogicalTypeScalar DuckDBTypeTimestamp
 
 instance DuckDBColumnType UTCTime where
     duckdbColumnTypeFor _ = "TIMESTAMPTZ"
-    duckLogicalType _ = LogicalTypeScalar DuckDBTypeTimestampTz
+    duckdbLogicalType _ = LogicalTypeScalar DuckDBTypeTimestampTz
 
 instance DuckDBColumnType TimeWithZone where
     duckdbColumnTypeFor _ = "TIMEZ"
-    duckLogicalType _ = LogicalTypeScalar DuckDBTypeTimestampTz
+    duckdbLogicalType _ = LogicalTypeScalar DuckDBTypeTimestampTz
 
 instance DuckDBColumnType Aeson.Value where
     duckdbColumnTypeFor _ = "JSON"
-    duckLogicalType _ = LogicalTypeJSON -- Special case, this is an alias for VARCHAR
+    duckdbLogicalType _ = LogicalTypeJSON -- Special case, this is an alias for VARCHAR
 
 instance (DuckDBColumnType a) => DuckDBColumnType (Maybe a) where
     duckdbColumnTypeFor _ = duckdbColumnTypeFor (Proxy :: Proxy a)
-    duckLogicalType _ = duckLogicalType (Proxy :: Proxy a)
+    duckdbLogicalType _ = duckdbLogicalType (Proxy :: Proxy a)
 
 instance (DuckDBColumnType a, DuckDBColumnType b) => DuckDBColumnType (Map a b) where
     duckdbColumnTypeFor _ = "MAP(" <> duckdbColumnTypeFor (Proxy :: Proxy a) <> ", " <> duckdbColumnTypeFor (Proxy :: Proxy b) <> ")"
-    duckLogicalType _ =
+    duckdbLogicalType _ =
         LogicalTypeMap
-            (duckLogicalType (Proxy :: Proxy a))
-            (duckLogicalType (Proxy :: Proxy b))
+            (duckdbLogicalType (Proxy :: Proxy a))
+            (duckdbLogicalType (Proxy :: Proxy b))
 
 instance DuckDBColumnType IntervalValue where
     duckdbColumnTypeFor _ = "INTERVAL"
-    duckLogicalType _ = LogicalTypeScalar DuckDBTypeInterval
+    duckdbLogicalType _ = LogicalTypeScalar DuckDBTypeInterval
 
 
 -- | List values encode as DuckDB LIST (variable-length).
 instance (DuckDBColumnType a) => DuckDBColumnType [a] where
     duckdbColumnTypeFor _ = duckdbColumnTypeFor (Proxy @a) <> "[]"
-    duckLogicalType _ = LogicalTypeList (duckLogicalType (Proxy :: Proxy a))
+    duckdbLogicalType _ = LogicalTypeList (duckdbLogicalType (Proxy :: Proxy a))
 
 instance (DuckDBColumnType a) => DuckDBColumnType (NonEmpty a) where
     duckdbColumnTypeFor _ = duckdbColumnTypeFor (Proxy @a) <> "[]"
-    duckLogicalType _ = LogicalTypeList (duckLogicalType (Proxy :: Proxy a))
+    duckdbLogicalType _ = LogicalTypeList (duckdbLogicalType (Proxy :: Proxy a))
 
 
 instance (DuckDBColumnType a) => DuckDBColumnType (Array Int a) where
     duckdbColumnTypeFor _ = duckdbColumnTypeFor (Proxy @a) <> "[]"
-    duckLogicalType _ =
+    duckdbLogicalType _ =
         -- We can't determine array size at the type level, so this is approximate.
         -- The actual size will be determined at runtime from the array bounds.
-        LogicalTypeArray (duckLogicalType (Proxy :: Proxy a)) 0
+        LogicalTypeArray (duckdbLogicalType (Proxy :: Proxy a)) 0
 
 nullBinding :: String -> FieldBinding
 nullBinding repr = valueBinding repr nullDuckValue
