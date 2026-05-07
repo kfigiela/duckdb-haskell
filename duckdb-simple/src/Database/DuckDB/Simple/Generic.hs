@@ -161,7 +161,6 @@ should be represented; both the generic implementation and the manual
 class DuckValue a where
     duckToField :: a -> FieldValue
     duckFromField :: FieldValue -> Either String a
-    duckLogicalType :: Proxy a -> LogicalTypeRep
 
     default duckFromField :: (FromField a, Show a) => FieldValue -> Either String a
     duckFromField fv =
@@ -171,129 +170,100 @@ class DuckValue a where
 
 instance DuckValue Bool where
     duckToField = FieldBool
-    duckLogicalType _ = LogicalTypeScalar DuckDBTypeBoolean
 
 instance DuckValue Int where
     duckToField = FieldInt64 . fromIntegral
-    duckLogicalType _ = LogicalTypeScalar DuckDBTypeBigInt
 
 instance DuckValue Int8 where
     duckToField = FieldInt8
-    duckLogicalType _ = LogicalTypeScalar DuckDBTypeTinyInt
 
 instance DuckValue Int16 where
     duckToField = FieldInt16
-    duckLogicalType _ = LogicalTypeScalar DuckDBTypeSmallInt
 
 instance DuckValue Int32 where
     duckToField = FieldInt32
-    duckLogicalType _ = LogicalTypeScalar DuckDBTypeInteger
 
 instance DuckValue Int64 where
     duckToField = FieldInt64
-    duckLogicalType _ = LogicalTypeScalar DuckDBTypeBigInt
 
 instance DuckValue Integer where
     duckToField = FieldHugeInt
-    duckLogicalType _ = LogicalTypeScalar DuckDBTypeHugeInt
 
 instance DuckValue Natural where
     duckToField = FieldUHugeInt . toInteger
-    duckLogicalType _ = LogicalTypeScalar DuckDBTypeUHugeInt
 
 instance DuckValue Word where
     duckToField = FieldWord64 . fromIntegral
-    duckLogicalType _ = LogicalTypeScalar DuckDBTypeUBigInt
 
 instance DuckValue Word8 where
     duckToField = FieldWord8
-    duckLogicalType _ = LogicalTypeScalar DuckDBTypeUTinyInt
 
 instance DuckValue Word16 where
     duckToField = FieldWord16
-    duckLogicalType _ = LogicalTypeScalar DuckDBTypeUSmallInt
 
 instance DuckValue Word32 where
     duckToField = FieldWord32
-    duckLogicalType _ = LogicalTypeScalar DuckDBTypeUInteger
 
 instance DuckValue Word64 where
     duckToField = FieldWord64
-    duckLogicalType _ = LogicalTypeScalar DuckDBTypeUBigInt
 
 instance DuckValue Float where
     duckToField = FieldFloat
-    duckLogicalType _ = LogicalTypeScalar DuckDBTypeFloat
 
 instance DuckValue Double where
     duckToField = FieldDouble
-    duckLogicalType _ = LogicalTypeScalar DuckDBTypeDouble
 
 instance DuckValue Text where
     duckToField = FieldText
-    duckLogicalType _ = LogicalTypeScalar DuckDBTypeVarchar
 
 instance DuckValue String where
     duckToField = FieldText . Text.pack
-    duckLogicalType _ = LogicalTypeScalar DuckDBTypeVarchar
     duckFromField fv = Text.unpack <$> duckFromField fv
 
 instance DuckValue BS.ByteString where
     duckToField = FieldBlob
-    duckLogicalType _ = LogicalTypeScalar DuckDBTypeBlob
 
 instance DuckValue Day where
     duckToField = FieldDate
-    duckLogicalType _ = LogicalTypeScalar DuckDBTypeDate
 
 instance DuckValue TimeOfDay where
     duckToField = FieldTime
-    duckLogicalType _ = LogicalTypeScalar DuckDBTypeTime
 
 instance DuckValue LocalTime where
     duckToField = FieldTimestamp
-    duckLogicalType _ = LogicalTypeScalar DuckDBTypeTimestamp
 
 instance DuckValue UTCTime where
     duckToField = FieldTimestampTZ
-    duckLogicalType _ = LogicalTypeScalar DuckDBTypeTimestampTz
 
 instance DuckValue UUID.UUID where
     duckToField = FieldUUID
-    duckLogicalType _ = LogicalTypeScalar DuckDBTypeUUID
 
 instance DuckValue IntervalValue where
     duckToField = FieldInterval
-    duckLogicalType _ = LogicalTypeScalar DuckDBTypeInterval
 
 instance DuckValue TimeWithZone where
     duckToField = FieldTimeTZ
-    duckLogicalType _ = LogicalTypeScalar DuckDBTypeTimeTz
 
 instance (DuckValue a) => DuckValue (Maybe a) where
     duckToField (Just x) = duckToField x
     duckToField Nothing = FieldNull
-    duckLogicalType _ = duckLogicalType (Proxy :: Proxy a)
     duckFromField FieldNull = Right Nothing
     duckFromField other = Just <$> duckFromField other
 
 -- | List values encode as DuckDB LIST (variable-length).
 instance (DuckValue a) => DuckValue [a] where
     duckToField xs = FieldList (map duckToField xs)
-    duckLogicalType _ = LogicalTypeList (duckLogicalType (Proxy :: Proxy a))
     duckFromField (FieldList fvs) = traverse duckFromField fvs
     duckFromField other = Left ("duckdb-simple: expected LIST, got " <> show other)
 
 -- | NonEmpty list values encode as DuckDB LIST (variable-length).
 instance (DuckValue a) => DuckValue (NonEmpty a) where
     duckToField xs = FieldList (map duckToField $ NE.toList xs)
-    duckLogicalType _ = LogicalTypeList (duckLogicalType (Proxy :: Proxy a))
     duckFromField (FieldList fvs) = maybe (Left "duckdb-simple: expected non empty list, 0 elements found") (traverse duckFromField) $ NE.nonEmpty fvs
     duckFromField other = Left ("duckdb-simple: expected LIST, got " <> show other)
 
 instance DuckValue Aeson.Value where
   duckToField = FieldText . T.toStrict . Aeson.encodeToLazyText
-  duckLogicalType _ = LogicalTypeJSON -- Special case, this is an alias for VARCHAR
 
 {- | Array values encode as DuckDB ARRAY (fixed-length).
 Note: Arrays must have consistent bounds to work correctly with DuckDB.
@@ -303,10 +273,6 @@ instance (DuckValue a) => DuckValue (Array Int a) where
         let values = elems arr
             (low, high) = (0, length values - 1)
          in FieldArray (listArray (low, high) (map duckToField values))
-    duckLogicalType _ =
-        -- We can't determine array size at the type level, so this is approximate.
-        -- The actual size will be determined at runtime from the array bounds.
-        LogicalTypeArray (duckLogicalType (Proxy :: Proxy a)) 0
     duckFromField (FieldArray arr) = do
         let values = elems arr
         decoded <- traverse duckFromField values
@@ -319,10 +285,6 @@ instance (Ord k, DuckValue k, DuckValue v) => DuckValue (Map.Map k v) where
     duckToField m =
         let pairs = Map.toList m
          in FieldMap [(duckToField k, duckToField v) | (k, v) <- pairs]
-    duckLogicalType _ =
-        LogicalTypeMap
-            (duckLogicalType (Proxy :: Proxy k))
-            (duckLogicalType (Proxy :: Proxy v))
     duckFromField (FieldMap pairs) = do
         decodedPairs <- traverse decodePair pairs
         pure (Map.fromList decodedPairs)
@@ -345,7 +307,6 @@ instance (Generic a, GToField (Rep a), GFromField (Rep a)) => DuckValue (ViaDuck
     case genericFromFieldValue fieldValue of
         Right value -> pure (ViaDuckDB value)
         Left err -> Left err
-  duckLogicalType _ = genericLogicalType (Proxy @a)
 
 
 --------------------------------------------------------------------------------
@@ -538,7 +499,7 @@ instance (GStruct a, GStruct b) => GStruct (a :*: b) where
     gStructValues (a :*: b) = gStructValues a ++ gStructValues b
     gStructTypes _ = gStructTypes (Proxy :: Proxy (a p)) ++ gStructTypes (Proxy :: Proxy (b p))
 
-instance (Selector s, DuckValue a) => GStruct (M1 S s (K1 i a)) where
+instance (Selector s, DuckDBColumnType a, DuckValue a) => GStruct (M1 S s (K1 i a)) where
     gStructValues m@(M1 (K1 x)) =
         let name = toMaybe (selName m)
          in [FieldComponent name (duckToField x)]
@@ -716,6 +677,7 @@ used for diagnostics (errors and column metadata).
 -}
 instance (Generic a, GToField (Rep a)) => DuckDBColumnType (ViaDuckDB a) where
     duckdbColumnTypeFor _ = renderLogicalType $ genericLogicalType (Proxy :: Proxy a)
+    duckLogicalType _ = genericLogicalType (Proxy @a)
 
 renderLogicalType :: LogicalTypeRep -> Text
 renderLogicalType = \case
@@ -748,18 +710,6 @@ instance (Generic a, GToField (Rep a)) => ToField (ViaDuckDB a) where
                             FieldUnion uv -> toField uv
                             FieldStruct sv -> toField sv
                             FieldNull -> toField (Nothing :: Maybe Int)
-                            other -> error ("duckdb-simple: unsupported generic encoding " <> show other)
-    toFieldValue (ViaDuckDB x ) =
-        case genericToUnionValue x of
-            Just unionVal -> toFieldValue unionVal
-            Nothing ->
-                case genericToStructValue x of
-                    Just structVal -> toFieldValue structVal
-                    Nothing ->
-                        case genericToFieldValue x of
-                            FieldUnion uv -> toFieldValue uv
-                            FieldStruct sv -> toFieldValue sv
-                            FieldNull -> toFieldValue (Nothing :: Maybe Int)
                             other -> error ("duckdb-simple: unsupported generic encoding " <> show other)
 
 {- | Deriving-via @FromField@ instance. Errors are rewrapped using the existing
@@ -847,6 +797,7 @@ instance Aeson.ToJSON a => ToDuckValue (ViaJSON a) where
     toDuckValue (ViaJSON v) = toDuckValue (Aeson.toJSON v)
 instance DuckDBColumnType (ViaJSON a) where
     duckdbColumnTypeFor _ = duckdbColumnTypeFor (Proxy @Aeson.Value)
+    duckLogicalType _ = duckLogicalType (Proxy @Aeson.Value)
 
 instance ( Aeson.ToJSON a, Aeson.FromJSON (ViaJSON a)) => DuckValue  (ViaJSON a) where
     duckToField (ViaJSON v) = duckToField . Aeson.toJSON $ v
@@ -854,4 +805,3 @@ instance ( Aeson.ToJSON a, Aeson.FromJSON (ViaJSON a)) => DuckValue  (ViaJSON a)
         Right (Aeson.Success v) -> pure v
         Right (Aeson.Error err) -> Left err
         Left err -> Left err
-    duckLogicalType _ = duckLogicalType (Proxy @Aeson.Value)

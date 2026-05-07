@@ -84,6 +84,7 @@ import Test.Tasty (TestTree, defaultMain, testGroup)
 import Test.Tasty.ExpectedFailure (expectFailBecause)
 import Test.Tasty.HUnit
 import Test.Tasty.QuickCheck (testProperty, (===))
+import Data.Text (Text)
 
 data Person = Person
     { personId :: Int
@@ -356,7 +357,7 @@ statementTests =
         , testCase "execute runs with positional parameters" $
             withConnection ":memory:" \conn -> do
                 _ <- execute_ conn "CREATE TABLE exec_params (a INTEGER, b TEXT)"
-                count <- execute conn "INSERT INTO exec_params VALUES (?, ?)" (5 :: Int, "hi" :: String)
+                count <- execute conn "INSERT INTO exec_params VALUES (?, ?)" (5 :: Int, "hi" :: Text)
                 assertEqual "rows affected" 1 count
         , testCase "rejects invalid direct execution" $
             withConnection ":memory:" \conn ->
@@ -366,20 +367,20 @@ statementTests =
             withConnection ":memory:" \conn -> do
                 _ <- execute_ conn "CREATE TABLE params (a INTEGER, b TEXT)"
                 withStatement conn "INSERT INTO params VALUES (?, ?)" \stmt -> do
-                    bind stmt [toField (5 :: Int), toField ("hi" :: String)]
+                    bind stmt [toField (5 :: Int), toField ("hi" :: Text)]
                     changed <- executeStatement stmt
                     assertEqual "rows affected" 1 changed
         , testCase "executeMany reuses prepared statements" $
             withConnection ":memory:" \conn -> do
                 _ <- execute_ conn "CREATE TABLE params_many (a INTEGER, b TEXT)"
-                total <- executeMany conn "INSERT INTO params_many VALUES (?, ?)" [(1 :: Int, "x" :: String), (2 :: Int, "y" :: String)]
+                total <- executeMany conn "INSERT INTO params_many VALUES (?, ?)" [(1 :: Int, "x" :: Text), (2 :: Int, "y" :: Text)]
                 assertEqual "rows affected" 2 total
         , testCase "executeNamed binds named parameters" $
             withConnection ":memory:" \conn -> do
                 _ <- execute_ conn "CREATE TABLE named_params (a INTEGER, b TEXT)"
-                count <- executeNamed conn "INSERT INTO named_params VALUES ($a, $b)" ["$a" := (1 :: Int), "$b" := ("named" :: String)]
+                count <- executeNamed conn "INSERT INTO named_params VALUES ($a, $b)" ["$a" := (1 :: Int), "$b" := ("named" :: Text)]
                 assertEqual "rows affected" 1 count
-                rows <- queryNamed conn "SELECT a FROM named_params WHERE b = $label" ["$label" := ("named" :: String)]
+                rows <- queryNamed conn "SELECT a FROM named_params WHERE b = $label" ["$label" := ("named" :: Text)]
                 assertEqual "named query" [Only (1 :: Int)] rows
         , testCase "rejects incorrect positional argument counts" $
             withConnection ":memory:" \conn -> do
@@ -399,7 +400,7 @@ statementTests =
                 assertThrows
                     ( withStatement conn "INSERT INTO mixed_params VALUES (?, $label)" \stmt -> do
                         bind stmt [toField (1 :: Int)]
-                        bindNamed stmt ["$label" := ("combo" :: String)]
+                        bindNamed stmt ["$label" := ("combo" :: Text)]
                         _ <- executeStatement stmt
                         pure ()
                     )
@@ -409,7 +410,7 @@ statementTests =
         , testCase "generic FromRow derivation works" $
             withConnection ":memory:" \conn -> do
                 _ <- execute_ conn "CREATE TABLE person (id INTEGER, name TEXT)"
-                _ <- executeMany conn "INSERT INTO person VALUES (?, ?)" [(1 :: Int, "Alice" :: String), (2 :: Int, "Bob" :: String)]
+                _ <- executeMany conn "INSERT INTO person VALUES (?, ?)" [(1 :: Int, "Alice" :: Text), (2 :: Int, "Bob" :: Text)]
                 people <- query_ conn "SELECT id, name FROM person ORDER BY id" :: IO [Person]
                 assertEqual "person rows" [Person 1 (Text.pack "Alice"), Person 2 (Text.pack "Bob")] people
         , testCase "(:.) composes row parsing and parameter encoding" $
@@ -427,21 +428,21 @@ statementTests =
         , testCase "query_ fetches rows" $
             withConnection ":memory:" \conn -> do
                 _ <- execute_ conn "CREATE TABLE query_rows (a INTEGER, b TEXT)"
-                _ <- executeMany conn "INSERT INTO query_rows VALUES (?, ?)" [(1 :: Int, "x" :: String), (2 :: Int, "y" :: String)]
+                _ <- executeMany conn "INSERT INTO query_rows VALUES (?, ?)" [(1 :: Int, "x" :: Text), (2 :: Int, "y" :: Text)]
                 rows <- query_ conn "SELECT a, b FROM query_rows ORDER BY a"
-                assertEqual "query rows" [(1 :: Int, "x" :: String), (2 :: Int, "y" :: String)] rows
+                assertEqual "query rows" [(1 :: Int, "x" :: Text), (2 :: Int, "y" :: Text)] rows
         , testCase "query decodes NULL as Maybe" $
             withConnection ":memory:" \conn -> do
                 _ <- execute_ conn "CREATE TABLE maybe_vals (a TEXT)"
-                _ <- execute conn "INSERT INTO maybe_vals VALUES (?)" (Only (Just ("present" :: String)))
-                _ <- execute conn "INSERT INTO maybe_vals VALUES (?)" (Only (Nothing :: Maybe String))
+                _ <- execute conn "INSERT INTO maybe_vals VALUES (?)" (Only (Just ("present" :: Text)))
+                _ <- execute conn "INSERT INTO maybe_vals VALUES (?)" (Only (Nothing :: Maybe Text))
                 rows <- query_ conn "SELECT a FROM maybe_vals ORDER BY a IS NULL, a"
-                assertEqual "maybe decoding" [Only (Just ("present" :: String)), Only Nothing] rows
+                assertEqual "maybe decoding" [Only (Just ("present" :: Text)), Only Nothing] rows
         , testCase "query fetches rows with parameters" $
             withConnection ":memory:" \conn -> do
                 _ <- execute_ conn "CREATE TABLE query_params (a INTEGER, b TEXT)"
-                _ <- executeMany conn "INSERT INTO query_params VALUES (?, ?)" [(1 :: Int, "x" :: String), (2 :: Int, "y" :: String)]
-                rows <- query conn "SELECT a FROM query_params WHERE b = ?" (Only ("y" :: String))
+                _ <- executeMany conn "INSERT INTO query_params VALUES (?, ?)" [(1 :: Int, "x" :: Text), (2 :: Int, "y" :: Text)]
+                rows <- query conn "SELECT a FROM query_params WHERE b = ?" (Only ("y" :: Text))
                 assertEqual "query result" [Only (2 :: Int)] rows
         , testCase "column mismatch surfaces as SQLError" $
             withConnection ":memory:" \conn -> do
@@ -502,7 +503,7 @@ statementTests =
         , testCase "RowParser alternatives fall back" $
             withConnection ":memory:" \conn -> do
                 _ <- execute_ conn "CREATE TABLE yesno (answer TEXT)"
-                _ <- executeMany conn "INSERT INTO yesno VALUES (?)" [Only ("yes" :: String), Only ("no" :: String)]
+                _ <- executeMany conn "INSERT INTO yesno VALUES (?)" [Only ("yes" :: Text), Only ("no" :: Text)]
                 rows <- query_ conn "SELECT answer FROM yesno ORDER BY answer" :: IO [YesNo]
                 assertEqual "yes/no parsing" [YesNo False, YesNo True] rows
         ]

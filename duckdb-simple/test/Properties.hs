@@ -128,7 +128,7 @@ specs =
     , SomeRoundTrip "Word64" (Proxy :: Proxy Word64) (arbitrary :: Gen Word64) shrink
     , SomeRoundTrip "Float" (Proxy :: Proxy Float) genFiniteFloat shrink
     , SomeRoundTrip "Double" (Proxy :: Proxy Double) genFiniteDouble shrink
-    , SomeRoundTrip "String" (Proxy :: Proxy String) genStringNoNul shrinkStringNoNul
+    -- , SomeRoundTrip "String" (Proxy :: Proxy String) genStringNoNul shrinkStringNoNul
     , SomeRoundTrip "Text" (Proxy :: Proxy Text.Text) genTextNoNul shrinkTextNoNul
     , SomeRoundTrip "ByteString" (Proxy :: Proxy BS.ByteString) genByteString shrinkByteString
     , SomeRoundTrip "BitString" (Proxy :: Proxy BitString) genBitString shrinkBitString

@@ -15,7 +15,7 @@ The @ToField@ class mirrors the interface provided by @sqlite-simple@ while
 delegating to the DuckDB C API under the hood.
 -}
 module Database.DuckDB.Simple.ToField (
-    FieldBinding,
+    FieldBinding(fieldBindingValue),
     ToDuckValue (..),
     ToField (..),
     DuckDBColumnType (..),
@@ -26,7 +26,8 @@ module Database.DuckDB.Simple.ToField (
     fieldValueWithTypeDuckValue,
     structValueDuckValue,
     unionValueDuckValue,
-    withDuckValues
+    withDuckValues,
+    toFieldValue
 ) where
 
 import Control.Exception (bracket, throwIO)
@@ -74,6 +75,7 @@ import qualified Data.Aeson.Types as Aeson
 import qualified Data.Aeson.Text as Aeson
 import qualified Data.Text.Lazy as LText
 import Data.Map (Map)
+import Data.List.NonEmpty (NonEmpty)
 
 -- | Represents a named parameter binding using the @:=@ operator.
 data NamedParam where
@@ -84,6 +86,7 @@ infixr 3 :=
 -- | Encapsulates the action required to bind a single positional parameter, together with a textual description used in diagnostics.
 data FieldBinding = FieldBinding
     { fieldBindingAction :: !(Statement -> DuckDBIdx -> IO ())
+    , fieldBindingValue :: !(IO DuckDBValue)
     , fieldBindingDisplay :: !String
     }
 
@@ -94,12 +97,14 @@ class (DuckDBColumnType a) => ToDuckValue a where
 
 valueBinding :: String -> IO DuckDBValue -> FieldBinding
 valueBinding display mkValue =
-    mkFieldBinding display $ \stmt idx ->
+    mkFieldBinding display mkValue $ \stmt idx ->
         bindDuckValue stmt idx mkValue
 
 -- | Types that map to a concrete DuckDB column type when used with @ToField@.
 class DuckDBColumnType a where
     duckdbColumnTypeFor :: Proxy a -> Text
+    duckLogicalType :: Proxy a -> LogicalTypeRep
+
 
 -- | Report the DuckDB column type that best matches a given @ToField@ instance.
 duckdbColumnType :: forall a. (DuckDBColumnType a) => Proxy a -> Text
@@ -113,10 +118,11 @@ bindFieldBinding stmt idx FieldBinding{fieldBindingAction} = fieldBindingAction 
 renderFieldBinding :: FieldBinding -> String
 renderFieldBinding FieldBinding{fieldBindingDisplay} = fieldBindingDisplay
 
-mkFieldBinding :: String -> (Statement -> DuckDBIdx -> IO ()) -> FieldBinding
-mkFieldBinding display action =
+mkFieldBinding :: String ->  IO DuckDBValue  -> (Statement -> DuckDBIdx -> IO ()) -> FieldBinding
+mkFieldBinding display value action =
     FieldBinding
         { fieldBindingAction = action
+        , fieldBindingValue = value
         , fieldBindingDisplay = display
         }
 
@@ -125,14 +131,12 @@ class ToField a where
     toField :: a -> FieldBinding
     default toField :: (Show a, ToDuckValue a) => a -> FieldBinding
     toField value = valueBinding (show value) (toDuckValue value)
-    toFieldValue :: a -> IO DuckDBValue
-    default toFieldValue :: (Show a, ToDuckValue a) => a -> IO DuckDBValue
-    toFieldValue = toDuckValue
 
+toFieldValue :: ToField a => a -> IO DuckDBValue
+toFieldValue = fieldBindingValue . toField
 
 instance ToField Null where
     toField Null = nullBinding "NULL"
-    toFieldValue Null = nullDuckValue
 
 instance ToField Bool
 instance ToField Int
@@ -151,7 +155,7 @@ instance ToField Word64
 instance ToField Double
 instance ToField Float
 instance ToField Text
-instance ToField String
+-- instance ToField String
 instance ToField BitString
 instance ToField Day
 instance ToField TimeOfDay
@@ -164,16 +168,15 @@ instance ToField BigNum where
 instance ToField (StructValue FieldValue) where
     toField structVal =
         valueBinding "<struct>" (structValueDuckValue structVal)
-    toFieldValue = structValueDuckValue
 
 instance ToField (UnionValue FieldValue) where
     toField unionVal =
         let label = Text.unpack (unionValueLabel unionVal)
          in valueBinding ("<union " <> label <> ">") (unionValueDuckValue unionVal)
-    toFieldValue = unionValueDuckValue
 
 instance DuckDBColumnType BitString where
     duckdbColumnTypeFor _ = "BIT"
+    duckLogicalType _ = LogicalTypeScalar DuckDBTypeBit
 
 instance ToField BS.ByteString where
     toField bs =
@@ -193,7 +196,6 @@ instance (DuckDBColumnType a, ToDuckValue a) => ToField (Array Int a) where
         valueBinding
             ("<array length=" <> show (length (elems arr)) <> ">")
             (arrayDuckValue arr)
-    toFieldValue = arrayDuckValue
 
 instance (ToField a) => ToField (Maybe a) where
     toField Nothing = nullBinding "Nothing"
@@ -202,92 +204,158 @@ instance (ToField a) => ToField (Maybe a) where
          in binding
                 { fieldBindingDisplay = "Just " <> renderFieldBinding binding
                 }
-    toFieldValue = maybe nullDuckValue toFieldValue
 
 instance DuckDBColumnType Null where
     duckdbColumnTypeFor _ = "NULL"
+    duckLogicalType _ = LogicalTypeScalar DuckDBTypeSQLNull
 
 instance DuckDBColumnType Bool where
     duckdbColumnTypeFor _ = "BOOLEAN"
+    duckLogicalType _ = LogicalTypeScalar DuckDBTypeBoolean
+
 
 instance DuckDBColumnType Int where
     duckdbColumnTypeFor _ = "BIGINT"
+    duckLogicalType _ = LogicalTypeScalar DuckDBTypeBigInt
+
 
 instance DuckDBColumnType Int8 where
     duckdbColumnTypeFor _ = "TINYINT"
+    duckLogicalType _ = LogicalTypeScalar DuckDBTypeTinyInt
+
 
 instance DuckDBColumnType Int16 where
     duckdbColumnTypeFor _ = "SMALLINT"
+    duckLogicalType _ = LogicalTypeScalar DuckDBTypeSmallInt
+
 
 instance DuckDBColumnType Int32 where
     duckdbColumnTypeFor _ = "INTEGER"
+    duckLogicalType _ = LogicalTypeScalar DuckDBTypeInteger
 
 instance DuckDBColumnType Int64 where
     duckdbColumnTypeFor _ = "BIGINT"
-
-instance DuckDBColumnType BigNum where
-    duckdbColumnTypeFor _ = "BIGNUM"
-
-instance DuckDBColumnType UUID.UUID where
-    duckdbColumnTypeFor _ = "UUID"
+    duckLogicalType _ = LogicalTypeScalar DuckDBTypeBigInt
 
 instance DuckDBColumnType Integer where
     duckdbColumnTypeFor _ = "BIGNUM"
+    duckLogicalType _ = LogicalTypeScalar DuckDBTypeHugeInt
+
+instance DuckDBColumnType BigNum where
+    duckdbColumnTypeFor _ = "BIGNUM"
+    duckLogicalType _ = LogicalTypeScalar DuckDBTypeHugeInt
+
+instance DuckDBColumnType UUID.UUID where
+    duckdbColumnTypeFor _ = "UUID"
+    duckLogicalType _ = LogicalTypeScalar DuckDBTypeUUID
+
 
 instance DuckDBColumnType Natural where
     duckdbColumnTypeFor _ = "BIGNUM"
+    duckLogicalType _ = LogicalTypeScalar DuckDBTypeUHugeInt
+
 
 instance DuckDBColumnType Word where
     duckdbColumnTypeFor _ = "UBIGINT"
+    duckLogicalType _ = LogicalTypeScalar DuckDBTypeUBigInt
+
 
 instance DuckDBColumnType Word8 where
     duckdbColumnTypeFor _ = "UTINYINT"
+    duckLogicalType _ = LogicalTypeScalar DuckDBTypeUTinyInt
+
 
 instance DuckDBColumnType Word16 where
     duckdbColumnTypeFor _ = "USMALLINT"
+    duckLogicalType _ = LogicalTypeScalar DuckDBTypeUSmallInt
+
 
 instance DuckDBColumnType Word32 where
     duckdbColumnTypeFor _ = "UINTEGER"
+    duckLogicalType _ = LogicalTypeScalar DuckDBTypeUInteger
+
 
 instance DuckDBColumnType Word64 where
     duckdbColumnTypeFor _ = "UBIGINT"
+    duckLogicalType _ = LogicalTypeScalar DuckDBTypeUBigInt
+
 
 instance DuckDBColumnType Double where
     duckdbColumnTypeFor _ = "DOUBLE"
+    duckLogicalType _ = LogicalTypeScalar DuckDBTypeDouble
 
 instance DuckDBColumnType Float where
     duckdbColumnTypeFor _ = "FLOAT"
+    duckLogicalType _ = LogicalTypeScalar DuckDBTypeFloat
 
 instance DuckDBColumnType Text where
     duckdbColumnTypeFor _ = "TEXT"
+    duckLogicalType _ = LogicalTypeScalar DuckDBTypeVarchar
 
-instance DuckDBColumnType String where
-    duckdbColumnTypeFor _ = "TEXT"
+-- instance DuckDBColumnType String where
+    -- duckdbColumnTypeFor _ = "TEXT"
+    -- duckLogicalType _ = LogicalTypeScalar DuckDBTypeVarchar
 
 instance DuckDBColumnType BS.ByteString where
     duckdbColumnTypeFor _ = "BLOB"
+    duckLogicalType _ = LogicalTypeScalar DuckDBTypeBlob
 
 instance DuckDBColumnType Day where
     duckdbColumnTypeFor _ = "DATE"
+    duckLogicalType _ = LogicalTypeScalar DuckDBTypeDate
 
 instance DuckDBColumnType TimeOfDay where
     duckdbColumnTypeFor _ = "TIME"
+    duckLogicalType _ = LogicalTypeScalar DuckDBTypeTime
 
 instance DuckDBColumnType LocalTime where
     duckdbColumnTypeFor _ = "TIMESTAMP"
+    duckLogicalType _ = LogicalTypeScalar DuckDBTypeTimestamp
 
 instance DuckDBColumnType UTCTime where
     duckdbColumnTypeFor _ = "TIMESTAMPTZ"
+    duckLogicalType _ = LogicalTypeScalar DuckDBTypeTimestampTz
+
+instance DuckDBColumnType TimeWithZone where
+    duckdbColumnTypeFor _ = "TIMEZ"
+    duckLogicalType _ = LogicalTypeScalar DuckDBTypeTimestampTz
 
 instance DuckDBColumnType Aeson.Value where
     duckdbColumnTypeFor _ = "JSON"
+    duckLogicalType _ = LogicalTypeJSON -- Special case, this is an alias for VARCHAR
 
 instance (DuckDBColumnType a) => DuckDBColumnType (Maybe a) where
     duckdbColumnTypeFor _ = duckdbColumnTypeFor (Proxy :: Proxy a)
+    duckLogicalType _ = duckLogicalType (Proxy :: Proxy a)
 
 instance (DuckDBColumnType a, DuckDBColumnType b) => DuckDBColumnType (Map a b) where
     duckdbColumnTypeFor _ = "MAP(" <> duckdbColumnTypeFor (Proxy :: Proxy a) <> ", " <> duckdbColumnTypeFor (Proxy :: Proxy b) <> ")"
+    duckLogicalType _ =
+        LogicalTypeMap
+            (duckLogicalType (Proxy :: Proxy a))
+            (duckLogicalType (Proxy :: Proxy b))
 
+instance DuckDBColumnType IntervalValue where
+    duckdbColumnTypeFor _ = "INTERVAL"
+    duckLogicalType _ = LogicalTypeScalar DuckDBTypeInterval
+
+
+-- | List values encode as DuckDB LIST (variable-length).
+instance (DuckDBColumnType a) => DuckDBColumnType [a] where
+    duckdbColumnTypeFor _ = duckdbColumnTypeFor (Proxy @a) <> "[]"
+    duckLogicalType _ = LogicalTypeList (duckLogicalType (Proxy :: Proxy a))
+
+instance (DuckDBColumnType a) => DuckDBColumnType (NonEmpty a) where
+    duckdbColumnTypeFor _ = duckdbColumnTypeFor (Proxy @a) <> "[]"
+    duckLogicalType _ = LogicalTypeList (duckLogicalType (Proxy :: Proxy a))
+
+
+instance (DuckDBColumnType a) => DuckDBColumnType (Array Int a) where
+    duckdbColumnTypeFor _ = duckdbColumnTypeFor (Proxy @a) <> "[]"
+    duckLogicalType _ =
+        -- We can't determine array size at the type level, so this is approximate.
+        -- The actual size will be determined at runtime from the array bounds.
+        LogicalTypeArray (duckLogicalType (Proxy :: Proxy a)) 0
 
 nullBinding :: String -> FieldBinding
 nullBinding repr = valueBinding repr nullDuckValue
@@ -332,8 +400,8 @@ textDuckValue :: Text -> IO DuckDBValue
 textDuckValue txt =
     TextForeign.withCString txt c_duckdb_create_varchar
 
-stringDuckValue :: String -> IO DuckDBValue
-stringDuckValue = textDuckValue . Text.pack
+-- stringDuckValue :: String -> IO DuckDBValue
+-- stringDuckValue = textDuckValue . Text.pack
 
 blobDuckValue :: BS.ByteString -> IO DuckDBValue
 blobDuckValue bs =
@@ -788,8 +856,8 @@ instance ToDuckValue Float where
 instance ToDuckValue Text where
     toDuckValue = textDuckValue
 
-instance ToDuckValue String where
-    toDuckValue = stringDuckValue
+-- instance ToDuckValue String where
+--     toDuckValue = stringDuckValue
 
 instance ToDuckValue BS.ByteString where
     toDuckValue = blobDuckValue
