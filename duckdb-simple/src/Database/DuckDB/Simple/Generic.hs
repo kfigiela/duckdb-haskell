@@ -848,7 +848,7 @@ instance Aeson.ToJSON a => ToDuckValue (ViaJSON a) where
 instance DuckDBColumnType (ViaJSON a) where
     duckdbColumnTypeFor _ = duckdbColumnTypeFor (Proxy @Aeson.Value)
 
-instance (Show (ViaJSON a), Aeson.ToJSON a, Aeson.FromJSON (ViaJSON a)) => DuckValue  (ViaJSON a) where
+instance ( Aeson.ToJSON a, Aeson.FromJSON (ViaJSON a)) => DuckValue  (ViaJSON a) where
     duckToField (ViaJSON v) = duckToField . Aeson.toJSON $ v
     duckFromField fv = case Aeson.fromJSON <$> duckFromField fv  of
         Right (Aeson.Success v) -> pure v
