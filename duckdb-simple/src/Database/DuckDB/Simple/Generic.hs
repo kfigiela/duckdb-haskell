@@ -769,7 +769,7 @@ instance (Generic a, GToField (Rep a), GFromField (Rep a)) => ToDuckValue (ViaDu
 
 
 
-instance (Ord k, ToDuckValue k, ToDuckValue v, DuckValue k, DuckValue v) => ToDuckValue (Map k v) where
+instance (Ord k, ToDuckValue k, ToDuckValue v, DuckDBColumnType k, DuckDBColumnType v) => ToDuckValue (Map k v) where
   toDuckValue m= do
     let keyRep = duckLogicalType (Proxy @k)
     let valueRep = duckLogicalType (Proxy @v)
