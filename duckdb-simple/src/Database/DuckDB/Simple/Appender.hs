@@ -44,6 +44,7 @@ import Database.DuckDB.Simple.Generic (renderLogicalType, DuckValue (duckLogical
 import GHC.TypeLits (KnownSymbol, symbolVal)
 import qualified Data.Text as Text
 import Database.DuckDB.Simple.ToField (fieldValueWithTypeDuckValue)
+import Database.DuckDB.Simple.DirectGeneric (AppendTableRow(appendDuckRowSchema))
 
 type TableName = Text
 
@@ -106,11 +107,11 @@ appendTableRow app row = do
 
 --
 
-createTableQuery :: ToAppenderRow a => Text -> Proxy a -> Query
+createTableQuery :: AppendTableRow a => Text -> Proxy a -> Query
 createTableQuery nme pxy = Query $ "CREATE TABLE \"" <> nme <> "\" (" <> tableSchema pxy <> ")" -- FIXME: unsafe
 
-tableSchema :: ToAppenderRow a => Proxy a -> Text
-tableSchema pxy = Text.intercalate ", " ["\"" <> structFieldName <> "\" " <> renderLogicalType structFieldValue | StructField{structFieldName, structFieldValue} <- toAppenderSchema pxy]
+tableSchema :: (AppendTableRow a) => Proxy a -> Text
+tableSchema pxy = Text.intercalate ", " ["\"" <> structFieldName <> "\" " <> structFieldValue | (structFieldName, structFieldValue) <- appendDuckRowSchema pxy]
 
 -- | Types that can be transformed into parameter bindings.
 class ToAppenderRow (a :: Type) where

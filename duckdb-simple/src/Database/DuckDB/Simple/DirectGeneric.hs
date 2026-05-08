@@ -19,7 +19,7 @@
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE TupleSections #-}
 
-module Database.DuckDB.Simple.DirectGeneric  where
+module Database.DuckDB.Simple.DirectGeneric (DirectDuckValue (..), ViaJSON(..), ViaDuckProduct(..), ViaDuckUnion(..), AppendTableRow(..))  where
 
 
 import qualified Data.Aeson as Aeson
@@ -665,3 +665,46 @@ instance  A.ToJSON a => DirectDuckValue (ViaJSON a) where
     directDuckValue (ViaJSON v) = directDuckValue $ A.toJSON v
     directLogicalTypeUncached _ = directLogicalTypeUncached (Proxy @A.Value)
     directTypeName _ = directTypeName (Proxy @A.Value)
+---
+
+
+-- | Types that can be transformed into parameter bindings.
+class AppendTableRow (a :: Type) where
+  appendDuckRow :: DuckDBAppender -> a -> IO DuckDBState
+  default appendDuckRow :: (Generic a, GAppendTableRow (Rep a)) => DuckDBAppender -> a -> IO DuckDBState
+  appendDuckRow app = gappendDuckRow app . from
+
+  appendDuckRowSchema :: Proxy a -> [(Text, Text)]
+  default appendDuckRowSchema :: (Generic a, GAppendTableRow (Rep a)) => Proxy a -> [(Text, Text)]
+  appendDuckRowSchema _ = gappendDuckRowSchema (Proxy @(Rep a))
+
+    -- toAppenderSchema _ = gtoAppenderSchema (Proxy @(Rep a))
+    -- toAppenderValues :: a -> IO [DuckDBValue]
+    -- default toAppenderValues :: (Generic a, GAppendTableRow (Rep a)) => a -> IO [DuckDBValue]
+    -- toAppenderValues = gtoAppenderValues . from
+
+-- -- | Generic helper for deriving `ToTable`.
+class GAppendTableRow (f :: Type -> Type) where
+    -- gtoAppenderSchema :: Proxy f -> [StructField LogicalTypeRep]
+    gappendDuckRow :: DuckDBAppender -> f b -> IO DuckDBState
+    gappendDuckRowSchema :: Proxy f -> [(Text, Text)]
+
+-- instance GAppendTableRow U1 where
+--     gtoAppenderSchema _ = []
+--     gtoAppenderValues _ = pure []
+
+instance (DirectDuckValue a, KnownSymbol selectorName) => GAppendTableRow (S1 ('MetaSel ('Just selectorName) q w e)(K1 i a)) where
+    gappendDuckRowSchema _ = [( Text.pack $ symbolVal (Proxy @selectorName), directTypeName (Proxy @a))]
+    gappendDuckRow app (M1 (K1 v)) = appendDuckValue app v
+
+instance (GAppendTableRow a, GAppendTableRow b) => GAppendTableRow (a :*: b) where
+    gappendDuckRowSchema _ = gappendDuckRowSchema (Proxy @a) <> gappendDuckRowSchema (Proxy @b)
+    gappendDuckRow app (a :*: b) = gappendDuckRow app a >> gappendDuckRow app b
+
+instance (GAppendTableRow a) => GAppendTableRow (M1 C c a) where
+    gappendDuckRowSchema _ = gappendDuckRowSchema (Proxy @a)
+    gappendDuckRow app (M1 v) = gappendDuckRow app v
+
+instance (GAppendTableRow a) => GAppendTableRow (M1 D c a) where
+    gappendDuckRowSchema _ = gappendDuckRowSchema (Proxy @a)
+    gappendDuckRow app (M1 v) = gappendDuckRow app v
