@@ -21,7 +21,7 @@
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 
-module Database.DuckDB.Simple.DirectGeneric (DirectDuckValue (..), ViaJSON(..), ViaDuckProduct(..), ViaDuckUnion(..), AppendTableRow(..), renderDuckTypeName, DuckTypeName(..))  where
+module Database.DuckDB.Simple.DirectGeneric (DirectDuckValue (..), ViaJSON(..), ViaDuckStruct(..), ViaDuckUnion(..), ViaDuckEnum(..), AppendTableRow(..), renderDuckTypeName, DuckTypeName(..))  where
 
 
 import qualified Data.Aeson as Aeson
@@ -552,33 +552,33 @@ timeWithZoneDuckValue TimeWithZone{timeWithZoneTime, timeWithZoneZone} = do
 ----
 
 
-newtype ViaDuckProduct a = ViaDuckProduct a
+newtype ViaDuckStruct a = ViaDuckStruct a
 
 
-instance (DirectDuckValue a, Typeable a, GDuckProduct (Rep a), Generic a) => ToField (ViaDuckProduct a) where
+instance (DirectDuckValue a, Typeable a, GDuckStruct (Rep a), Generic a) => ToField (ViaDuckStruct a) where
     toField v = valueBinding "<direct>" (leakAllocated <$> directDuckValue v)
 
-instance (Typeable a, GDuckProduct (Rep a), Generic a) => DirectDuckValue (ViaDuckProduct a) where
-    directDuckValue (ViaDuckProduct v) = do
-        structType <- leakAllocated <$> cacheDirectLogicalType (typeRep $ Proxy @a) (gstructType $ gproductType $ Proxy @(Rep a))
-        withManyAllocated (gproductValue $ from v) $ \childValues ->
+instance (Typeable a, GDuckStruct (Rep a), Generic a) => DirectDuckValue (ViaDuckStruct a) where
+    directDuckValue (ViaDuckStruct v) = do
+        structType <- leakAllocated <$> cacheDirectLogicalType (typeRep $ Proxy @a) (gstructTypeIO $ gstructType $ Proxy @(Rep a))
+        withManyAllocated (gstructValue $ from v) $ \childValues ->
           withArray childValues $ fmap Allocated . c_duckdb_create_struct_value structType
 
-    directLogicalTypeUncached _ = gstructType $ gproductType $ Proxy @(Rep a)
+    directLogicalTypeUncached _ = gstructTypeIO $ gstructType $ Proxy @(Rep a)
 
-    directTypeName _ = gstructTypeName "STRUCT" $ gproductType $ Proxy @(Rep a)
+    directTypeName _ = gstructTypeName "STRUCT" $ gstructType $ Proxy @(Rep a)
 
-data GDuckProductField = GDuckProductField { gname :: Text, gtypeName :: DuckTypeName, glogicalType :: IO (Allocated DuckDBLogicalType)}
+data GDuckStructField = GDuckStructField { gname :: Text, gtypeName :: DuckTypeName, glogicalType :: IO (Allocated DuckDBLogicalType)}
 
-gstructType :: [GDuckProductField] -> IO (Allocated DuckDBLogicalType)
-gstructType flds = do
+gstructTypeIO :: [GDuckStructField] -> IO (Allocated DuckDBLogicalType)
+gstructTypeIO flds = do
       evaluatedTypes <- mapM (fmap leakAllocated . glogicalType) flds
       withMany Text.withCString (gname <$> flds) $ \namePtrs ->
           withArray namePtrs $ \nameArray ->
           withArray evaluatedTypes $ \typeArray ->
                   Allocated <$> c_duckdb_create_struct_type typeArray nameArray (fromIntegral $ length flds)
 
-gunionTypeLogical :: [GDuckProductField] -> IO (Allocated DuckDBLogicalType)
+gunionTypeLogical :: [GDuckStructField] -> IO (Allocated DuckDBLogicalType)
 gunionTypeLogical flds = do
       evaluatedTypes <- mapM (fmap leakAllocated . glogicalType) flds
       withMany Text.withCString (gname <$> flds) $ \namePtrs ->
@@ -587,31 +587,31 @@ gunionTypeLogical flds = do
                   Allocated <$> c_duckdb_create_union_type typeArray nameArray (fromIntegral $ length flds)
 
 
-gstructTypeName :: Text -> [GDuckProductField] -> DuckTypeName
-gstructTypeName pfx flds =   DuckTypeName $ pfx <> "(" <> Text.intercalate ", " ["\"" <> nme <> "\" " <> renderDuckTypeName tpeNme  | GDuckProductField nme tpeNme _ <- flds] <> ")"
-class GDuckProduct (f :: Type -> Type) where
-  gproductValue :: f b -> [IO (Allocated DuckDBValue)]
-  gproductType :: Proxy f -> [GDuckProductField]
+gstructTypeName :: Text -> [GDuckStructField] -> DuckTypeName
+gstructTypeName pfx flds =   DuckTypeName $ pfx <> "(" <> Text.intercalate ", " ["\"" <> nme <> "\" " <> renderDuckTypeName tpeNme  | GDuckStructField nme tpeNme _ <- flds] <> ")"
+class GDuckStruct (f :: Type -> Type) where
+  gstructValue :: f b -> [IO (Allocated DuckDBValue)]
+  gstructType :: Proxy f -> [GDuckStructField]
 
-instance (DirectDuckValue a, KnownSymbol selectorName, Typeable a) => GDuckProduct (S1 ('MetaSel ('Just selectorName) q w e) (K1 i a)) where
-    gproductValue (M1 (K1 v)) = pure $ directDuckValue v
-    gproductType _ = pure $ GDuckProductField (Text.pack $ symbolVal (Proxy @selectorName)) (directTypeName (Proxy @a)) (directLogicalType (Proxy @a))
+instance (DirectDuckValue a, KnownSymbol selectorName, Typeable a) => GDuckStruct (S1 ('MetaSel ('Just selectorName) q w e) (K1 i a)) where
+    gstructValue (M1 (K1 v)) = pure $ directDuckValue v
+    gstructType _ = pure $ GDuckStructField (Text.pack $ symbolVal (Proxy @selectorName)) (directTypeName (Proxy @a)) (directLogicalType (Proxy @a))
 
-instance (GDuckProduct a, GDuckProduct b) => GDuckProduct (a :*: b) where
-    gproductValue (a :*: b) = gproductValue a <> gproductValue b
-    gproductType _ = gproductType (Proxy @a) <> gproductType (Proxy @b)
+instance (GDuckStruct a, GDuckStruct b) => GDuckStruct (a :*: b) where
+    gstructValue (a :*: b) = gstructValue a <> gstructValue b
+    gstructType _ = gstructType (Proxy @a) <> gstructType (Proxy @b)
 
-instance (GDuckProduct a) => GDuckProduct (M1 C c a) where
-    gproductValue (M1 v) = gproductValue v
-    gproductType _ = gproductType (Proxy @a)
+instance (GDuckStruct a) => GDuckStruct (M1 C c a) where
+    gstructValue (M1 v) = gstructValue v
+    gstructType _ = gstructType (Proxy @a)
 
-instance (GDuckProduct a) => GDuckProduct (M1 D c a) where
-    gproductValue (M1 v) = gproductValue v
-    gproductType _ = gproductType (Proxy @a)
+instance (GDuckStruct a) => GDuckStruct (M1 D c a) where
+    gstructValue (M1 v) = gstructValue v
+    gstructType _ = gstructType (Proxy @a)
 
 data TestProduct = TestProduct { foo :: Int, bar :: Day}
   deriving stock (Generic)
-  deriving DirectDuckValue via (ViaDuckProduct TestProduct)
+  deriving DirectDuckValue via (ViaDuckStruct TestProduct)
 
 --
 
@@ -630,7 +630,7 @@ instance (Typeable a, GDuckUnion (Rep a), Generic a) => DirectDuckValue (ViaDuck
 
 class GDuckUnion (f :: Type -> Type) where
   gunionValue :: Typeable a => Proxy a -> Word -> f b -> (Word, IO (Allocated DuckDBValue))
-  gunionType :: Proxy f -> [GDuckProductField]
+  gunionType :: Proxy f -> [GDuckStructField]
 
 data Tople (a :: Type) (b :: Symbol)
 
@@ -642,16 +642,16 @@ instance (GDuckUnion a, GDuckUnion b) => GDuckUnion (a :+: b) where
 
 instance {-# OVERLAPPABLE #-} (KnownSymbol conName) => GDuckUnion (C1 ('MetaCons conName foo bar) U1) where
     gunionValue (_ :: Proxy root) ix (M1 _) = (ix, Allocated <$> nullDuckValue)
-    gunionType _ = [GDuckProductField (Text.pack $ symbolVal (Proxy @conName)) "INT1" (primitiveType DuckDBTypeTinyInt)]
+    gunionType _ = [GDuckStructField (Text.pack $ symbolVal (Proxy @conName)) "INT1" (primitiveType DuckDBTypeTinyInt)]
 
-instance {-# OVERLAPS #-}  (GDuckProduct a, KnownSymbol conName) => GDuckUnion (C1 ('MetaCons conName foo bar) a) where
+instance {-# OVERLAPS #-}  (GDuckStruct a, KnownSymbol conName) => GDuckUnion (C1 ('MetaCons conName foo bar) a) where
     gunionValue (_ :: Proxy root) ix (M1 v) = (ix, ) $ do
-        structType <- leakAllocated <$> cacheDirectLogicalType (typeRep $ Proxy @(Tople root conName)) (gstructType $ gproductType $ Proxy @a)
-        withManyAllocated (gproductValue v) $ \childValues ->
+        structType <- leakAllocated <$> cacheDirectLogicalType (typeRep $ Proxy @(Tople root conName)) (gstructTypeIO $ gstructType $ Proxy @a)
+        withManyAllocated (gstructValue v) $ \childValues ->
           withArray childValues $ fmap Allocated . c_duckdb_create_struct_value structType
-    gunionType _ = [GDuckProductField (Text.pack $ symbolVal (Proxy @conName)) (gstructTypeName "STRUCT" t) (gstructType t)]
+    gunionType _ = [GDuckStructField (Text.pack $ symbolVal (Proxy @conName)) (gstructTypeName "STRUCT" t) (gstructTypeIO t)]
       where
-      t = gproductType $ Proxy @a
+      t = gstructType $ Proxy @a
 
 
 instance (GDuckUnion a) => GDuckUnion (M1 D c a) where
@@ -661,6 +661,48 @@ instance (GDuckUnion a) => GDuckUnion (M1 D c a) where
 data TestUnion = TestUnionA { rstar :: Int, tsryutuyrsa :: UTCTime} | TestUnionB { dupa :: Int, kupa :: Day} | NoStruct
   deriving stock (Generic)
   deriving DirectDuckValue via (ViaDuckUnion TestUnion)
+
+
+newtype ViaDuckEnum a = ViaDuckEnum a
+
+
+instance (GDuckEnum (Rep a), Generic a, Typeable a) => DirectDuckValue (ViaDuckEnum a) where
+    directDuckValue (ViaDuckEnum v) = do
+        unionType <- leakAllocated <$> cacheDirectLogicalType (typeRep $ Proxy @a) (genumLogicalType $ genumType (Proxy @(Rep a)))
+        let ix = genumValue 0 $ from v
+        Allocated <$> c_duckdb_create_enum_value unionType (fromIntegral ix)
+    directLogicalTypeUncached _ = genumLogicalType $ genumType (Proxy @(Rep a))
+    directTypeName _ =  DuckTypeName $ "ENUM("  <> Text.intercalate ", " [ "\"" <> ctor <> "\"" | ctor <- genumType $ Proxy @(Rep a)] <> ")"
+
+genumLogicalType :: [Text] -> IO (Allocated DuckDBLogicalType)
+genumLogicalType els = do
+      withMany Text.withCString els $ \namePtrs ->
+                      withArray namePtrs \nameArray ->
+                          Allocated <$> c_duckdb_create_enum_type nameArray (fromIntegral $ length els)
+
+
+
+class GDuckEnum (f :: Type -> Type) where
+  genumValue :: Word64 -> f b -> Word64
+  genumType :: Proxy f -> [Text]
+
+instance (GDuckEnum a, GDuckEnum b) => GDuckEnum (a :+: b) where
+  genumValue ix (L1 l) = genumValue ix l
+  genumValue ix (R1 r) = genumValue (succ ix) r
+  genumType _ = genumType (Proxy @a) <> genumType (Proxy @b)
+
+
+instance (KnownSymbol conName) => GDuckEnum (C1 ('MetaCons conName foo bar) U1) where
+    genumValue ix (M1 _) = ix
+    genumType _ = [Text.pack $ symbolVal (Proxy @conName)]
+
+instance (GDuckEnum a) => GDuckEnum (M1 D c a) where
+    genumValue ix (M1 v) = genumValue ix v
+    genumType _ = genumType (Proxy @a)
+
+data TestEnum = TestEnumA | TestEnumB | TestEnumC
+  deriving stock (Generic)
+  deriving DirectDuckValue via (ViaDuckEnum TestEnum)
 
 
 
@@ -684,20 +726,9 @@ class AppendTableRow (a :: Type) where
   default appendDuckRowSchema :: (Generic a, GAppendTableRow (Rep a)) => Proxy a -> [(Text, DuckTypeName)]
   appendDuckRowSchema _ = gappendDuckRowSchema (Proxy @(Rep a))
 
-    -- toAppenderSchema _ = gtoAppenderSchema (Proxy @(Rep a))
-    -- toAppenderValues :: a -> IO [DuckDBValue]
-    -- default toAppenderValues :: (Generic a, GAppendTableRow (Rep a)) => a -> IO [DuckDBValue]
-    -- toAppenderValues = gtoAppenderValues . from
-
--- -- | Generic helper for deriving `ToTable`.
 class GAppendTableRow (f :: Type -> Type) where
-    -- gtoAppenderSchema :: Proxy f -> [StructField LogicalTypeRep]
     gappendDuckRow :: DuckDBAppender -> f b -> IO DuckDBState
     gappendDuckRowSchema :: Proxy f -> [(Text, DuckTypeName)]
-
--- instance GAppendTableRow U1 where
---     gtoAppenderSchema _ = []
---     gtoAppenderValues _ = pure []
 
 instance (DirectDuckValue a, KnownSymbol selectorName) => GAppendTableRow (S1 ('MetaSel ('Just selectorName) q w e)(K1 i a)) where
     gappendDuckRowSchema _ = [( Text.pack $ symbolVal (Proxy @selectorName), directTypeName (Proxy @a))]
