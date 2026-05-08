@@ -44,7 +44,10 @@ import Database.DuckDB.Simple.Generic (renderLogicalType, DuckValue (duckLogical
 import GHC.TypeLits (KnownSymbol, symbolVal)
 import qualified Data.Text as Text
 import Database.DuckDB.Simple.ToField (fieldValueWithTypeDuckValue)
-import Database.DuckDB.Simple.DirectGeneric (AppendTableRow(appendDuckRowSchema))
+import Database.DuckDB.Simple.DirectGeneric (AppendTableRow(appendDuckRowSchema, appendDuckRow), renderDuckTypeName)
+import Database.DuckDB.FFI (c_duckdb_appender_error_data)
+import Database.DuckDB.FFI (c_duckdb_error_data_message)
+import Foreign.C (peekCString)
 
 type TableName = Text
 
@@ -74,44 +77,38 @@ withAppenderAcquire :: (Ptr DuckDBAppender -> IO DuckDBState) -> (DuckDBAppender
 withAppenderAcquire acquire action =
     alloca $ \appPtr -> do
         state <- acquire appPtr
-        when (state  /= DuckDBSuccess) $ throwIO (userError "duckdb-simple: could not acquire appender")
+        when (state /= DuckDBSuccess) $ throwIO (userError "duckdb-simple: could not acquire appender")
         case state of
           DuckDBSuccess -> pure ()
           DuckDBError -> throwIO (userError "withAppenderAcquire")
         app <- peek appPtr
         let release = do
-              destroyState <- c_duckdb_appender_destroy appPtr
-              when (destroyState  /= DuckDBSuccess) $ throwIO (userError "duckdb-simple: could not release appender")
+              assertSuccess app $ c_duckdb_appender_destroy appPtr
             flushAndClose = do
-                -- errPtr0 <- c_duckdb_appender_error_data app
-                --       when (errPtr0 /= nullPtr) $ do
-                --                         msg <- peekCString errPtr0
-                --                         error $ toText msg
-                flushState <- c_duckdb_appender_flush app
-                when (flushState  /= DuckDBSuccess) $ throwIO (userError "duckdb-simple: could not release appender")
-                closeState <- c_duckdb_appender_close app
-                when (closeState  /= DuckDBSuccess) $ throwIO (userError "duckdb-simple: could not release appender")
-
+                assertSuccess app $ c_duckdb_appender_flush app
+                assertSuccess app $ c_duckdb_appender_close app
         (action app <* flushAndClose) `finally` release
 
-appendTableRow :: (HasCallStack, ToAppenderRow a) => DuckDBAppender -> a -> IO ()
+appendTableRow :: (HasCallStack, AppendTableRow a) => DuckDBAppender -> a -> IO ()
 appendTableRow app row = do
-    assertSuccess $ c_duckdb_appender_begin_row app
-    toAppenderValues row >>= mapM_ (\v -> assertSuccess (c_duckdb_append_value app v) >> destroyValue v)
-    assertSuccess $ c_duckdb_appender_end_row app
-    where
-    assertSuccess :: (HasCallStack) => IO DuckDBState -> IO ()
-    assertSuccess f = f >>= \case
-      DuckDBSuccess -> pure ()
-      _errorStatus -> throwIO $ SQLError "duckdb-simple: appendTableRow status error" Nothing Nothing -- FIXME: proper error handling
+    assertSuccess app $ c_duckdb_appender_begin_row app
+    assertSuccess app $ appendDuckRow app row
+    assertSuccess app $ c_duckdb_appender_end_row app
 
+assertSuccess :: (HasCallStack) => DuckDBAppender -> IO DuckDBState -> IO ()
+assertSuccess app f = f >>= \case
+  DuckDBSuccess -> pure ()
+  _errorStatus -> do
+        err <- c_duckdb_appender_error_data app >>= c_duckdb_error_data_message >>= peekCString
+        throwIO $ SQLError("duckdb-simple: appender error" <> Text.pack err) Nothing Nothing -- FIXME: proper error handling
+{-# INLINE assertSuccess #-}
 --
 
 createTableQuery :: AppendTableRow a => Text -> Proxy a -> Query
 createTableQuery nme pxy = Query $ "CREATE TABLE \"" <> nme <> "\" (" <> tableSchema pxy <> ")" -- FIXME: unsafe
 
 tableSchema :: (AppendTableRow a) => Proxy a -> Text
-tableSchema pxy = Text.intercalate ", " ["\"" <> structFieldName <> "\" " <> structFieldValue | (structFieldName, structFieldValue) <- appendDuckRowSchema pxy]
+tableSchema pxy = Text.intercalate ", \n" ["\"" <> structFieldName <> "\" " <> renderDuckTypeName structFieldValue | (structFieldName, structFieldValue) <- appendDuckRowSchema pxy]
 
 -- | Types that can be transformed into parameter bindings.
 class ToAppenderRow (a :: Type) where

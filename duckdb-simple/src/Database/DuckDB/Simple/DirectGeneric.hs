@@ -17,9 +17,11 @@
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE DerivingVia #-}
 {-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE TupleSections #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 
-module Database.DuckDB.Simple.DirectGeneric (DirectDuckValue (..), ViaJSON(..), ViaDuckProduct(..), ViaDuckUnion(..), AppendTableRow(..))  where
+module Database.DuckDB.Simple.DirectGeneric (DirectDuckValue (..), ViaJSON(..), ViaDuckProduct(..), ViaDuckUnion(..), AppendTableRow(..), renderDuckTypeName, DuckTypeName(..))  where
 
 
 import qualified Data.Aeson as Aeson
@@ -63,12 +65,16 @@ import Data.Kind (Type)
 import GHC.TypeLits (KnownSymbol, symbolVal, Symbol)
 import qualified Data.Aeson as A
 import Database.DuckDB.Simple.ToField (ToField (toField), valueBinding)
+import Data.String (IsString(..))
 
 
 
 newtype Allocated a = Allocated {leakAllocated :: a}
 
-type DuckTypeName = Text
+
+newtype DuckTypeName = DuckTypeName { renderDuckTypeName :: Text }
+  deriving newtype (Semigroup, Monoid, IsString)
+
 
 class Destroy a where
   destroyAllocated :: Allocated a -> IO ()
@@ -177,31 +183,31 @@ instance DirectDuckValue Word where
     directDuckValue = fmap Allocated . uint64DuckValue . fromIntegral
     directLogicalTypeUncached _ = primitiveType DuckDBTypeUBigInt
     appendDuckValue app = c_duckdb_append_uint64 app . fromIntegral
-    directTypeName _ = "UINT8"
+    directTypeName _ = "UHUGEINT"
 
 instance DirectDuckValue Word8 where
     directDuckValue = fmap Allocated . uint8DuckValue
     directLogicalTypeUncached _ = primitiveType DuckDBTypeUTinyInt
     appendDuckValue = c_duckdb_append_uint8
-    directTypeName _ = "UINT1"
+    directTypeName _ = "UTINYINT"
 
 instance DirectDuckValue Word16 where
     directDuckValue = fmap Allocated . uint16DuckValue
     directLogicalTypeUncached _ = primitiveType DuckDBTypeUSmallInt
     appendDuckValue = c_duckdb_append_uint16
-    directTypeName _ = "UINT2"
+    directTypeName _ = "USMALLINT"
 
 instance DirectDuckValue Word32 where
     directDuckValue = fmap Allocated . uint32DuckValue
     directLogicalTypeUncached _ = primitiveType DuckDBTypeUInteger
     appendDuckValue = c_duckdb_append_uint32
-    directTypeName _ = "UINT4"
+    directTypeName _ = "UINTEGER"
 
 instance DirectDuckValue Word64 where
     directDuckValue = fmap Allocated . uint64DuckValue
     directLogicalTypeUncached _ = primitiveType DuckDBTypeUBigInt
     appendDuckValue = c_duckdb_append_uint64
-    directTypeName _ = "UINT8"
+    directTypeName _ = "UHUGEINT"
 
 instance DirectDuckValue Float where
     directDuckValue = fmap Allocated . floatDuckValue
@@ -282,7 +288,7 @@ instance (DirectDuckValue a, Typeable a) => DirectDuckValue [a] where
     directLogicalTypeUncached _ = do
       inner <- leakAllocated <$> directLogicalType (Proxy @a)
       Allocated <$> c_duckdb_create_list_type inner
-    directTypeName _ = "LIST(" <> directTypeName (Proxy @a) <> ")"
+    directTypeName _ = directTypeName (Proxy @a) <> "[]"
 
 -- instance (DirectDuckValue a) => DirectDuckValue (Vector len a) where -- from vector sized, I don't need it right now so whatever
 --     directDuckValue = arrayDuckValue
@@ -337,7 +343,7 @@ instance (Ord k, DirectDuckValue k, DirectDuckValue v, Typeable k, Typeable v) =
     kt <- leakAllocated <$> directLogicalType (Proxy @k)
     vt <- leakAllocated <$> directLogicalType (Proxy @v)
     Allocated <$> c_duckdb_create_map_type kt vt
-  directTypeName _ = "MAP(" <> directTypeName (Proxy @k) <> ", " <> directTypeName (Proxy @v) <> "[]"
+  directTypeName _ = "MAP(" <> directTypeName (Proxy @k) <> ", " <> directTypeName (Proxy @v) <> ")"
 
 ---
 
@@ -581,8 +587,8 @@ gunionTypeLogical flds = do
                   Allocated <$> c_duckdb_create_union_type typeArray nameArray (fromIntegral $ length flds)
 
 
-gstructTypeName :: Text -> [GDuckProductField] -> Text
-gstructTypeName pfx flds =       pfx <> "(" <> Text.intercalate ", " ["\"" <> nme <> "\" " <> tpeNme  | GDuckProductField nme tpeNme _ <- flds] <>  ")"
+gstructTypeName :: Text -> [GDuckProductField] -> DuckTypeName
+gstructTypeName pfx flds =   DuckTypeName $ pfx <> "(" <> Text.intercalate ", " ["\"" <> nme <> "\" " <> renderDuckTypeName tpeNme  | GDuckProductField nme tpeNme _ <- flds] <> ")"
 class GDuckProduct (f :: Type -> Type) where
   gproductValue :: f b -> [IO (Allocated DuckDBValue)]
   gproductType :: Proxy f -> [GDuckProductField]
@@ -674,8 +680,8 @@ class AppendTableRow (a :: Type) where
   default appendDuckRow :: (Generic a, GAppendTableRow (Rep a)) => DuckDBAppender -> a -> IO DuckDBState
   appendDuckRow app = gappendDuckRow app . from
 
-  appendDuckRowSchema :: Proxy a -> [(Text, Text)]
-  default appendDuckRowSchema :: (Generic a, GAppendTableRow (Rep a)) => Proxy a -> [(Text, Text)]
+  appendDuckRowSchema :: Proxy a -> [(Text, DuckTypeName)]
+  default appendDuckRowSchema :: (Generic a, GAppendTableRow (Rep a)) => Proxy a -> [(Text, DuckTypeName)]
   appendDuckRowSchema _ = gappendDuckRowSchema (Proxy @(Rep a))
 
     -- toAppenderSchema _ = gtoAppenderSchema (Proxy @(Rep a))
@@ -687,7 +693,7 @@ class AppendTableRow (a :: Type) where
 class GAppendTableRow (f :: Type -> Type) where
     -- gtoAppenderSchema :: Proxy f -> [StructField LogicalTypeRep]
     gappendDuckRow :: DuckDBAppender -> f b -> IO DuckDBState
-    gappendDuckRowSchema :: Proxy f -> [(Text, Text)]
+    gappendDuckRowSchema :: Proxy f -> [(Text, DuckTypeName)]
 
 -- instance GAppendTableRow U1 where
 --     gtoAppenderSchema _ = []
