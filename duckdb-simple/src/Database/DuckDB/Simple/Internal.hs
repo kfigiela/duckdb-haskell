@@ -64,7 +64,6 @@ import Database.DuckDB.FFI (
     DuckDBVector,
     c_duckdb_connection_get_client_context,
     c_duckdb_destroy_client_context,
-    c_duckdb_destroy_logical_type,
     c_duckdb_destroy_value,
  )
 import Foreign.C.String (CString)

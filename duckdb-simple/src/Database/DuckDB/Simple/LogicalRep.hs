@@ -32,11 +32,9 @@ import qualified Data.Text as Text
 import Data.Word (Word16, Word64, Word8)
 import Database.DuckDB.FFI
 import Foreign.C.String (peekCString, withCString)
-import Foreign.Marshal.Alloc (alloca)
 import Foreign.Marshal.Array (withArray)
 import Foreign.Marshal.Utils (withMany)
 import Foreign.Ptr (castPtr, nullPtr)
-import Foreign.Storable (poke)
 import Data.IORef (IORef, newIORef, readIORef)
 import GHC.IO (unsafePerformIO)
 import GHC.IORef (atomicModifyIORef'_)
