@@ -78,37 +78,37 @@ import Data.Text.Encoding (encodeUtf8)
 -- | Internal representation of a column value.
 data FieldValue
     = FieldNull
-    | FieldInt8 Int8
-    | FieldInt16 Int16
-    | FieldInt32 Int32
-    | FieldInt64 Int64
-    | FieldWord8 Word8
-    | FieldWord16 Word16
-    | FieldWord32 Word32
-    | FieldWord64 Word64
-    | FieldUUID UUID.UUID
-    | FieldFloat Float
-    | FieldDouble Double
-    | FieldText Text
-    | FieldBool Bool
-    | FieldBlob BS.ByteString
-    | FieldDate Day
-    | FieldTime TimeOfDay
-    | FieldTimestamp LocalTime
-    | FieldInterval IntervalValue
-    | FieldHugeInt Integer
-    | FieldUHugeInt Integer
-    | FieldDecimal DecimalValue
-    | FieldTimestampTZ UTCTime
-    | FieldTimeTZ TimeWithZone
-    | FieldBit BitString
-    | FieldBigNum BigNum
-    | FieldEnum Word32
-    | FieldArray (Array Int FieldValue)
-    | FieldList [FieldValue]
-    | FieldMap [(FieldValue, FieldValue)]
-    | FieldStruct (StructValue FieldValue)
-    | FieldUnion (UnionValue FieldValue)
+    | FieldInt8 !Int8
+    | FieldInt16 !Int16
+    | FieldInt32 !Int32
+    | FieldInt64 !Int64
+    | FieldWord8 !Word8
+    | FieldWord16 !Word16
+    | FieldWord32 !Word32
+    | FieldWord64 !Word64
+    | FieldUUID !UUID.UUID
+    | FieldFloat !Float
+    | FieldDouble !Double
+    | FieldText !Text
+    | FieldBool !Bool
+    | FieldBlob !BS.ByteString
+    | FieldDate !Day
+    | FieldTime !TimeOfDay
+    | FieldTimestamp !LocalTime
+    | FieldInterval !IntervalValue
+    | FieldHugeInt !Integer
+    | FieldUHugeInt !Integer
+    | FieldDecimal !DecimalValue
+    | FieldTimestampTZ !UTCTime
+    | FieldTimeTZ !TimeWithZone
+    | FieldBit !BitString
+    | FieldBigNum !BigNum
+    | FieldEnum !Word32
+    | FieldArray !(Array Int FieldValue)
+    | FieldList ![FieldValue]
+    | FieldMap ![(FieldValue, FieldValue)]
+    | FieldStruct !(StructValue FieldValue)
+    | FieldUnion !(UnionValue FieldValue)
     deriving (Eq, Show)
 
 -- | Exact-width decimal payload plus its declared width and scale.

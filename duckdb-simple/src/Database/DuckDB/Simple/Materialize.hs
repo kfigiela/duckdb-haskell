@@ -558,10 +558,10 @@ duckDBUHugeIntToInteger DuckDBUHugeInt{duckDBUHugeIntLower, duckDBUHugeIntUpper}
     (fromIntegral duckDBUHugeIntUpper `shiftL` 64) .|. fromIntegral duckDBUHugeIntLower
 
 destroyLogicalType :: DuckDBLogicalType -> IO ()
-destroyLogicalType logicalType =
-    alloca $ \ptr -> do
-        poke ptr logicalType
-        c_duckdb_destroy_logical_type ptr
+destroyLogicalType _logicalType = pure ()
+    -- alloca $ \ptr -> do
+    --     poke ptr logicalType
+    --     c_duckdb_destroy_logical_type ptr
 
 dateStructToDay :: DuckDBDateStruct -> Day
 dateStructToDay DuckDBDateStruct{duckDBDateStructYear, duckDBDateStructMonth, duckDBDateStructDay} =

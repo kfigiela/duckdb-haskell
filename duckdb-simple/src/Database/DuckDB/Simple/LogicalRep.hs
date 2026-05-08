@@ -1,6 +1,9 @@
 {-# LANGUAGE BlockArguments #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE NamedFieldPuns #-}
+{-# LANGUAGE DeriveAnyClass #-}
+{-# LANGUAGE DeriveGeneric #-}
+{-# OPTIONS_GHC -Wno-orphans #-}
 
 {- |
 Module      : Database.DuckDB.Simple.LogicalRep
@@ -34,26 +37,35 @@ import Foreign.Marshal.Array (withArray)
 import Foreign.Marshal.Utils (withMany)
 import Foreign.Ptr (castPtr, nullPtr)
 import Foreign.Storable (poke)
-
+import Data.IORef (IORef, newIORef, readIORef)
+import GHC.IO (unsafePerformIO)
+import GHC.IORef (atomicModifyIORef'_)
+import qualified Data.HashMap.Strict as Map
+import Data.Hashable
+import GHC.Generics (Generic)
+import qualified GHC.Ix
 -- | A Haskell description of a DuckDB logical type tree.
 data LogicalTypeRep
     = LogicalTypeScalar DuckDBType
     | LogicalTypeDecimal !Word8 !Word8
-    | LogicalTypeList LogicalTypeRep
-    | LogicalTypeArray LogicalTypeRep !Word64
-    | LogicalTypeMap LogicalTypeRep LogicalTypeRep
+    | LogicalTypeList !LogicalTypeRep
+    | LogicalTypeArray !LogicalTypeRep !Word64
+    | LogicalTypeMap !LogicalTypeRep !LogicalTypeRep
     | LogicalTypeStruct !(Array Int (StructField LogicalTypeRep))
     | LogicalTypeUnion !(Array Int UnionMemberType)
     | LogicalTypeEnum !(Array Int Text)
     | LogicalTypeJSON -- Ugly! VARCHAR on the wire, but this is a builtin type alias with special handling
-    deriving (Eq, Show)
+    deriving (Eq, Show, Ord,Generic, Hashable)
+
+instance (GHC.Ix.Ix n, Eq v, Hashable v) => Hashable (Array n v) where
+    hashWithSalt s v = hashWithSalt s $ elems v
 
 -- | A named field within a STRUCT-like value or type.
 data StructField a = StructField
     { structFieldName :: !Text
     , structFieldValue :: !a
     }
-    deriving (Eq, Show)
+    deriving (Eq, Show, Ord,Generic, Hashable)
 
 -- | A fully materialized STRUCT value together with its type metadata.
 data StructValue a = StructValue
@@ -68,7 +80,7 @@ data UnionMemberType = UnionMemberType
     { unionMemberName :: !Text
     , unionMemberType :: !LogicalTypeRep
     }
-    deriving (Eq, Show)
+    deriving (Eq, Show, Ord,Generic, Hashable)
 
 -- | A fully materialized UNION value together with its member metadata.
 data UnionValue a = UnionValue
@@ -89,10 +101,10 @@ unionValueTypeRep UnionValue{unionValueMembers} = LogicalTypeUnion unionValueMem
 
 -- | Destroy a logical type handle obtained from DuckDB.
 destroyLogicalType :: DuckDBLogicalType -> IO ()
-destroyLogicalType logical =
-    alloca \ptr -> do
-        poke ptr logical
-        c_duckdb_destroy_logical_type ptr
+destroyLogicalType _logical = pure ()
+    -- alloca \ptr -> do
+    --     poke ptr logical
+    --     c_duckdb_destroy_logical_type ptr
 
 -- | Convert a DuckDB logical type handle into the pure @LogicalTypeRep@ tree.
 logicalTypeToRep :: DuckDBLogicalType -> IO LogicalTypeRep
@@ -178,9 +190,24 @@ logicalTypeToRep logical = do
         _ ->
             pure (LogicalTypeScalar dtype)
 
+logicalTypeCache :: IORef (Map.HashMap LogicalTypeRep DuckDBLogicalType)
+logicalTypeCache = unsafePerformIO $ newIORef mempty
+{-# NOINLINE logicalTypeCache #-}
+
 -- | Materialize a DuckDB logical type handle from a @LogicalTypeRep@ tree.
-logicalTypeFromRep :: LogicalTypeRep -> IO DuckDBLogicalType
-logicalTypeFromRep = \case
+logicalTypeFromRep :: LogicalTypeRep -> IO DuckDBLogicalType -- TODO: cache
+logicalTypeFromRep t = do
+    curr <- readIORef logicalTypeCache
+    case Map.lookup t curr of
+        Just rep -> pure rep
+        Nothing -> do
+            rep <- logicalTypeFromRep' t
+            _ <- atomicModifyIORef'_ logicalTypeCache (Map.insert t rep)
+            pure rep
+
+
+logicalTypeFromRep' :: LogicalTypeRep -> IO DuckDBLogicalType -- TODO: cache
+logicalTypeFromRep' = \case
     LogicalTypeScalar dtype ->
         c_duckdb_create_logical_type dtype
     LogicalTypeJSON ->

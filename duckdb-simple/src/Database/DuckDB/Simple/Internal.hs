@@ -232,8 +232,8 @@ destroyValue value =
 
 -- | Destroy a logical type handle.
 destroyLogicalType :: DuckDBLogicalType -> IO ()
-destroyLogicalType logicalType =
-    alloca $ \ptr -> poke ptr logicalType >> c_duckdb_destroy_logical_type ptr
+destroyLogicalType _logicalType = pure ()
+    -- alloca $ \ptr -> poke ptr logicalType >> c_duckdb_destroy_logical_type ptr
 
 -- | Throw a standardised registration error.
 throwRegistrationError :: String -> IO a

@@ -794,10 +794,10 @@ duckDBTypeFromName name =
         _ -> Nothing
 
 destroyLogicalType :: DuckDBLogicalType -> IO ()
-destroyLogicalType logical =
-    alloca $ \ptr -> do
-        poke ptr logical
-        c_duckdb_destroy_logical_type ptr
+destroyLogicalType _logical = pure ()
+    -- alloca $ \ptr -> do
+    --     poke ptr logical
+    --     c_duckdb_destroy_logical_type ptr
 
 instance ToDuckValue Null where
     toDuckValue _ = nullDuckValue

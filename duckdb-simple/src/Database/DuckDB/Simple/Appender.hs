@@ -34,7 +34,7 @@ import Foreign.Marshal.Alloc (alloca)
 import Foreign.Marshal.Array (withArray)
 import Control.Exception (finally, throwIO)
 import Control.Monad (when)
-import Database.DuckDB.Simple.Internal (withConnectionHandle, Connection, SQLError(..), Query(..))
+import Database.DuckDB.Simple.Internal (withConnectionHandle, Connection, SQLError(..), Query(..), destroyValue)
 import GHC.Stack (HasCallStack)
 import Data.Data (Proxy (Proxy))
 import Data.Kind (Type)
@@ -96,7 +96,7 @@ withAppenderAcquire acquire action =
 appendTableRow :: (HasCallStack, ToAppenderRow a) => DuckDBAppender -> a -> IO ()
 appendTableRow app row = do
     assertSuccess $ c_duckdb_appender_begin_row app
-    toAppenderValues row >>= mapM_ (assertSuccess . c_duckdb_append_value app)
+    toAppenderValues row >>= mapM_ (\v -> assertSuccess (c_duckdb_append_value app v) >> destroyValue v)
     assertSuccess $ c_duckdb_appender_end_row app
     where
     assertSuccess :: (HasCallStack) => IO DuckDBState -> IO ()
