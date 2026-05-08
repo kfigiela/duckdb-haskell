@@ -1,0 +1,7 @@
+{
+  "haskell.manageHLS": "GHCup",
+  "haskell.serverExecutablePath": "/home/vscode/.ghcup/bin/haskell-language-server-wrapper",
+  "haskell.serverEnvironment": {
+    "LC_ALL": "en_US.UTF-8"
+  }
+}
