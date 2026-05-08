@@ -61,6 +61,7 @@ import GHC.IORef (atomicModifyIORef'_)
 import Data.Foldable (toList)
 import Data.Kind (Type)
 import GHC.TypeLits (KnownSymbol, symbolVal, Symbol)
+import qualified Data.Aeson as A
 
 
 
@@ -649,3 +650,13 @@ instance (GDuckUnion a) => GDuckUnion (M1 D c a) where
 data TestUnion = TestUnionA { rstar :: Int, tsryutuyrsa :: UTCTime} | TestUnionB { dupa :: Int, kupa :: Day} | NoStruct
   deriving stock (Generic)
   deriving DirectDuckValue via (ViaDuckUnion TestUnion)
+
+
+
+newtype ViaJSON a = ViaJSON a
+
+
+instance  A.ToJSON a => DirectDuckValue (ViaJSON a) where
+    directDuckValue (ViaJSON v) = directDuckValue $ A.toJSON v
+    directLogicalTypeUncached _ = directLogicalTypeUncached (Proxy @A.Value)
+    directTypeName _ = directTypeName (Proxy @A.Value)
