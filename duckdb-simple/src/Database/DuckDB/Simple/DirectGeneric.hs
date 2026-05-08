@@ -62,6 +62,7 @@ import Data.Foldable (toList)
 import Data.Kind (Type)
 import GHC.TypeLits (KnownSymbol, symbolVal, Symbol)
 import qualified Data.Aeson as A
+import Database.DuckDB.Simple.ToField (ToField (toField), valueBinding)
 
 
 
@@ -546,6 +547,10 @@ timeWithZoneDuckValue TimeWithZone{timeWithZoneTime, timeWithZoneZone} = do
 
 
 newtype ViaDuckProduct a = ViaDuckProduct a
+
+
+instance (DirectDuckValue a, Typeable a, GDuckProduct (Rep a), Generic a) => ToField (ViaDuckProduct a) where
+    toField v = valueBinding "<direct>" (leakAllocated <$> directDuckValue v)
 
 instance (Typeable a, GDuckProduct (Rep a), Generic a) => DirectDuckValue (ViaDuckProduct a) where
     directDuckValue (ViaDuckProduct v) = do

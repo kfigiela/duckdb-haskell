@@ -15,6 +15,7 @@ The @ToField@ class mirrors the interface provided by @sqlite-simple@ while
 delegating to the DuckDB C API under the hood.
 -}
 module Database.DuckDB.Simple.ToField (
+     valueBinding,
     FieldBinding(fieldBindingValue),
     ToDuckValue (..),
     ToField (..),
