@@ -22,9 +22,6 @@
 module Database.DuckDB.Simple.DirectGeneric  where
 
 
-import Control.Exception (displayException)
-import Control.Monad (unless)
-import Data.Array (Array, elems, listArray)
 import qualified Data.Aeson as Aeson
 import qualified Data.ByteString as BS
 import Data.Int (Int16, Int32, Int64, Int8)
@@ -37,58 +34,25 @@ import Data.Time (UTCTime, LocalTime (..), toGregorian, diffTimeToPicoseconds, t
 import qualified Data.Text.Foreign as TextForeign
 
 import Data.Time.Calendar (Day)
-import Data.Time.LocalTime (LocalTime, TimeOfDay)
+import Data.Time.LocalTime (TimeOfDay)
 import Data.Typeable (Typeable, TypeRep, typeRep)
 import qualified Data.UUID as UUID
 import Data.Word (Word16, Word32, Word64, Word8)
 import GHC.Generics
-import Numeric.Natural (Natural)
-import Database.DuckDB.Simple.FromField (BigNum (..), BitString (..), DecimalValue (..), FieldValue (..), IntervalValue (..), TimeWithZone (..), toBigNumBytes)
+import Database.DuckDB.Simple.FromField (BigNum (..), BitString (..), IntervalValue (..), TimeWithZone (..), toBigNumBytes)
 
 import Database.DuckDB.FFI
-import Database.DuckDB.Simple.FromField (
-    Field (..),
-    FieldValue (..),
-    FromField (..),
-    IntervalValue (..),
-    ResultError (..),
-    TimeWithZone (..),
-    returnError,
- )
-import Database.DuckDB.Simple.LogicalRep (
-    LogicalTypeRep (..),
-    StructField (..),
-    StructValue (..),
-    UnionMemberType (..),
-    UnionValue (..), logicalTypeFromRep,
- )
-import Database.DuckDB.Simple.Ok (Ok (..))
-import Database.DuckDB.Simple.ToField (DuckDBColumnType (..), ToField (..), ToDuckValue (toDuckValue), unionValueDuckValue, structValueDuckValue, fieldValueWithTypeDuckValue, withDuckValues)
 import Data.List.NonEmpty (NonEmpty)
-import qualified Data.List.NonEmpty as NE
 import qualified Data.Aeson.Text as Aeson
 import qualified Data.Text.Lazy as T
-import qualified Data.Array as Array
 import Data.Map (Map)
 import Database.DuckDB.Simple.Internal
 import Data.Set (Set)
-import qualified Data.Set as Set
-import Data.Bifunctor (second)
 import Foreign (alloca, Storable (poke), Ptr, castPtr, Bits (complement), withMany)
-import Database.DuckDB.Simple.Types
-import Foreign.C.String (peekCString)
 import Foreign.C.Types (CDouble (..), CFloat (CFloat))
 import Foreign.Marshal (fromBool)
-import Foreign.Marshal.Alloc (alloca)
 import Foreign.Marshal.Array (withArray)
-import Foreign.Ptr (Ptr, castPtr, nullPtr)
-import Foreign.Storable (poke)
-import Numeric.Natural (Natural)
-import qualified Data.Aeson.Types as Aeson
-import qualified Data.Aeson.Text as Aeson
-import qualified Data.Text.Lazy as LText
-import Data.Map (Map)
-import Data.List.NonEmpty (NonEmpty)
+import Foreign.Ptr (nullPtr)
 import Data.HashMap.Strict (HashMap)
 import Data.IORef (IORef, newIORef, readIORef)
 import GHC.IO (unsafePerformIO)
@@ -665,11 +629,11 @@ instance (GDuckUnion a, GDuckUnion b) => GDuckUnion (a :+: b) where
 
 
 instance {-# OVERLAPPABLE #-} (KnownSymbol conName) => GDuckUnion (C1 ('MetaCons conName foo bar) U1) where
-    gunionValue (_ :: Proxy root) ix ((M1 (v :: x))) = (ix, Allocated <$> nullDuckValue)
+    gunionValue (_ :: Proxy root) ix (M1 _) = (ix, Allocated <$> nullDuckValue)
     gunionType _ = [GDuckProductField (Text.pack $ symbolVal (Proxy @conName)) "INT1" (primitiveType DuckDBTypeTinyInt)]
 
 instance {-# OVERLAPS #-}  (GDuckProduct a, KnownSymbol conName) => GDuckUnion (C1 ('MetaCons conName foo bar) a) where
-    gunionValue (_ :: Proxy root) ix ((M1 (v :: x))) = (ix, ) $ do
+    gunionValue (_ :: Proxy root) ix (M1 v) = (ix, ) $ do
         structType <- leakAllocated <$> cacheDirectLogicalType (typeRep $ Proxy @(Tople root conName)) (gstructType $ gproductType $ Proxy @a)
         withManyAllocated (gproductValue v) $ \childValues ->
           withArray childValues $ fmap Allocated . c_duckdb_create_struct_value structType
