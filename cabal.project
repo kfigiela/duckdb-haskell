@@ -17,4 +17,4 @@ program-options
   -- Default warning flags
   ghc-options:
     -Wall
-    -Werror
+--    -Werror

@@ -21,7 +21,15 @@
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 
-module Database.DuckDB.Simple.DirectGeneric (DirectDuckValue (..), ViaJSON(..), ViaDuckStruct(..), ViaDuckUnion(..), ViaDuckEnum(..), AppendTableRow(..), renderDuckTypeName, DuckTypeName(..))  where
+module Database.DuckDB.Simple.DirectGeneric
+  ( DirectDuckValue (..)
+  , ViaJSON(..)
+  , ViaDuckStruct(..)
+  , ViaDuckUnion(..)
+  , ViaDuckEnum(..)
+  , AppendTableRow(..)
+  , DuckTypeName(..)
+  )  where
 
 
 import qualified Data.Aeson as Aeson
@@ -32,7 +40,7 @@ import Data.Proxy (Proxy (..))
 import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.Foreign as Text
-import Data.Time (UTCTime, LocalTime (..), toGregorian, diffTimeToPicoseconds, timeOfDayToTime, TimeZone (timeZoneMinutes), utcToLocalTime, utc)
+import Data.Time (UTCTime, LocalTime (..), utcToLocalTime, utc)
 import qualified Data.Text.Foreign as TextForeign
 
 import Data.Time.Calendar (Day)
@@ -41,7 +49,7 @@ import Data.Typeable (Typeable, TypeRep, typeRep)
 import qualified Data.UUID as UUID
 import Data.Word (Word16, Word32, Word64, Word8)
 import GHC.Generics
-import Database.DuckDB.Simple.FromField (BigNum (..), BitString (..), IntervalValue (..), TimeWithZone (..), toBigNumBytes)
+import Database.DuckDB.Simple.FromField (BigNum (..), IntervalValue (..), TimeWithZone (..))
 
 import Database.DuckDB.FFI
 import Data.List.NonEmpty (NonEmpty)
@@ -50,11 +58,9 @@ import qualified Data.Text.Lazy as T
 import Data.Map (Map)
 import Database.DuckDB.Simple.Internal
 import Data.Set (Set)
-import Foreign (alloca, Storable (poke), Ptr, castPtr, Bits (complement), withMany)
+import Foreign (alloca, Storable (poke), Ptr, castPtr, withMany)
 import Foreign.C.Types (CDouble (..), CFloat (CFloat))
-import Foreign.Marshal (fromBool)
 import Foreign.Marshal.Array (withArray)
-import Foreign.Ptr (nullPtr)
 import Data.HashMap.Strict (HashMap)
 import Data.IORef (IORef, newIORef, readIORef)
 import GHC.IO (unsafePerformIO)
@@ -66,15 +72,13 @@ import GHC.TypeLits (KnownSymbol, symbolVal, Symbol)
 import qualified Data.Aeson as A
 import Database.DuckDB.Simple.ToField (ToField (toField), valueBinding)
 import Data.String (IsString(..))
-
-
+import Control.Monad ((>=>))
+import Database.DuckDB.Simple.Internal.ValueHelpers
 
 newtype Allocated a = Allocated {leakAllocated :: a}
 
-
 newtype DuckTypeName = DuckTypeName { renderDuckTypeName :: Text }
   deriving newtype (Semigroup, Monoid, IsString)
-
 
 class Destroy a where
   destroyAllocated :: Allocated a -> IO ()
@@ -84,7 +88,6 @@ instance Destroy DuckDBValue where
 
 instance Destroy DuckDBLogicalType where
   destroyAllocated (Allocated a) = destroyLogicalType a
-
 
 withAllocated :: Destroy a => IO (Allocated a) -> (a -> IO b) -> IO b
 withAllocated alloc go = do
@@ -96,11 +99,12 @@ withManyAllocated alloc go = do
   a <- sequence alloc
   go (leakAllocated <$> a) <* mapM_ destroyAllocated a
 
-
 cache :: IORef (HashMap TypeRep (Allocated DuckDBLogicalType))
 cache = unsafePerformIO (newIORef mempty)
 {-# NOINLINE cache #-}
 
+-- | We only materialize duckdb logical types once and we never release them.
+-- This resulted in a significant performance gain when using high-performance appender API.
 directLogicalType :: (DirectDuckValue a, Typeable a) => Proxy a -> IO (Allocated DuckDBLogicalType)
 directLogicalType pxy = cacheDirectLogicalType (typeRep pxy) (directLogicalTypeUncached pxy)
 
@@ -114,7 +118,6 @@ cacheDirectLogicalType hsRep allocate = do
       _ <- atomicModifyIORef'_ cache (HashMap.insert hsRep rep)
       pure rep
 
-
 class DirectDuckValue a where
   directDuckValue :: a -> IO (Allocated DuckDBValue)
 
@@ -124,13 +127,8 @@ class DirectDuckValue a where
   directLogicalTypeUncached :: Proxy a -> IO (Allocated DuckDBLogicalType)
   directTypeName :: Proxy a -> DuckTypeName
 
-
 primitiveType :: DuckDBType -> IO (Allocated DuckDBLogicalType)
 primitiveType = fmap Allocated .  c_duckdb_create_logical_type
-
--- instance DirectDuckValue Null where
---     directDuckValue _ = Allocated <$> nullDuckValue
-    -- appendDuckValue app _ = c_duckdb_append_null app
 
 instance DirectDuckValue Bool where
     directDuckValue = fmap Allocated . boolDuckValue
@@ -170,14 +168,8 @@ instance DirectDuckValue Int64 where
 
 instance DirectDuckValue Integer where
     directDuckValue = fmap Allocated .  bigNumDuckValue . BigNum
-    directLogicalTypeUncached _ = primitiveType DuckDBTypeHugeInt
+    directLogicalTypeUncached _ = primitiveType DuckDBTypeBigNum
     directTypeName _ = "BIGNUM"
-
-
--- instance DirectDuckValue Natural where
---     directDuckValue = fmap Allocated . bigNumDuckValue . BigNum . toInteger -- TODO: verify implementation
---     directLogicalTypeUncached _ = primitiveType DuckDBTypeUHugeInt
---     directTypeName _ = "UBIGNUM"
 
 instance DirectDuckValue Word where
     directDuckValue = fmap Allocated . uint64DuckValue . fromIntegral
@@ -237,25 +229,25 @@ instance DirectDuckValue BS.ByteString where
 instance DirectDuckValue Day where
     directDuckValue = fmap Allocated . dayDuckValue
     directLogicalTypeUncached _ = primitiveType DuckDBTypeDate
-    appendDuckValue app val = encodeDay val >>= c_duckdb_append_date app
+    appendDuckValue app = encodeDay >=> c_duckdb_append_date app
     directTypeName _ = "DATE"
 
 instance DirectDuckValue TimeOfDay where
     directDuckValue = fmap Allocated . timeOfDayDuckValue
     directLogicalTypeUncached _ = primitiveType DuckDBTypeTime
-    appendDuckValue app val = encodeTimeOfDay val >>= c_duckdb_append_time app
+    appendDuckValue app = encodeTimeOfDay >=> c_duckdb_append_time app
     directTypeName _ = "TIME"
 
 instance DirectDuckValue LocalTime where
     directDuckValue = fmap Allocated . localTimeDuckValue
     directLogicalTypeUncached _ = primitiveType DuckDBTypeTimestamp
-    appendDuckValue app val = encodeLocalTime val >>= c_duckdb_append_timestamp app
+    appendDuckValue app = encodeLocalTime >=> c_duckdb_append_timestamp app
     directTypeName _ = "TIMESTAMP"
 
 instance DirectDuckValue UTCTime where
     directDuckValue = fmap Allocated . utcTimeDuckValue
     directLogicalTypeUncached _ = primitiveType DuckDBTypeTimestampTz
-    -- appendDuckValue app = c_duckdb_append_timestamp app . utcToLocalTime utc utcTime
+    appendDuckValue app = encodeLocalTime . utcToLocalTime utc >=> c_duckdb_append_timestamp app
     directTypeName _ = "TIMESTAMPTZ"
 
 instance DirectDuckValue UUID.UUID where
@@ -266,7 +258,10 @@ instance DirectDuckValue UUID.UUID where
 instance DirectDuckValue IntervalValue where -- TODO: Make it nominal diff time!
     directDuckValue = fmap Allocated . intervalDuckValue
     directLogicalTypeUncached _ = primitiveType DuckDBTypeInterval
-    -- appendDuckValue =  c_duckdb_append_interval
+    appendDuckValue app  IntervalValue{intervalMonths, intervalDays, intervalMicros} =
+        alloca \ptr -> do
+            poke ptr (DuckDBInterval intervalMonths intervalDays intervalMicros)
+            c_duckdb_append_interval app ptr
     directTypeName _ = "INTERVAL"
 
 instance DirectDuckValue TimeWithZone where
@@ -344,212 +339,6 @@ instance (Ord k, DirectDuckValue k, DirectDuckValue v, Typeable k, Typeable v) =
     vt <- leakAllocated <$> directLogicalType (Proxy @v)
     Allocated <$> c_duckdb_create_map_type kt vt
   directTypeName _ = "MAP(" <> directTypeName (Proxy @k) <> ", " <> directTypeName (Proxy @v) <> ")"
-
----
-
-
-nullDuckValue :: IO DuckDBValue
-nullDuckValue = c_duckdb_create_null_value
-
-boolDuckValue :: Bool -> IO DuckDBValue
-boolDuckValue value = c_duckdb_create_bool (if value then 1 else 0)
-
-int8DuckValue :: Int8 -> IO DuckDBValue
-int8DuckValue = c_duckdb_create_int8
-
-int16DuckValue :: Int16 -> IO DuckDBValue
-int16DuckValue = c_duckdb_create_int16
-
-int32DuckValue :: Int32 -> IO DuckDBValue
-int32DuckValue = c_duckdb_create_int32
-
-int64DuckValue :: Int64 -> IO DuckDBValue
-int64DuckValue = c_duckdb_create_int64
-
-uint64DuckValue :: Word64 -> IO DuckDBValue
-uint64DuckValue = c_duckdb_create_uint64
-
-uint32DuckValue :: Word32 -> IO DuckDBValue
-uint32DuckValue = c_duckdb_create_uint32
-
-uint16DuckValue :: Word16 -> IO DuckDBValue
-uint16DuckValue = c_duckdb_create_uint16
-
-uint8DuckValue :: Word8 -> IO DuckDBValue
-uint8DuckValue = c_duckdb_create_uint8
-
-doubleDuckValue :: Double -> IO DuckDBValue
-doubleDuckValue = c_duckdb_create_double . CDouble
-
-floatDuckValue :: Float -> IO DuckDBValue
-floatDuckValue = c_duckdb_create_double . CDouble . realToFrac
-
-textDuckValue :: Text -> IO DuckDBValue
-textDuckValue txt =
-    TextForeign.withCString txt c_duckdb_create_varchar
-
--- stringDuckValue :: String -> IO DuckDBValue
--- stringDuckValue = textDuckValue . Text.pack
-
-blobDuckValue :: BS.ByteString -> IO DuckDBValue
-blobDuckValue bs =
-    BS.useAsCStringLen bs \(ptr, len) ->
-        c_duckdb_create_blob (castPtr ptr :: Ptr Word8) (fromIntegral len)
-
-uuidDuckValue :: UUID.UUID -> IO DuckDBValue
-uuidDuckValue uuid =
-    alloca $ \ptr -> do
-        let (upper, lower) = UUID.toWords64 uuid
-        poke
-            ptr
-            DuckDBUHugeInt
-                { duckDBUHugeIntLower = lower
-                , duckDBUHugeIntUpper = upper
-                }
-        c_duckdb_create_uuid ptr
-
-bitDuckValue :: BitString -> IO DuckDBValue
-bitDuckValue (BitString padding bits) =
-    let withPacked action =
-            if BS.null bits
-                then alloca \ptr -> do
-                    poke
-                        ptr
-                        DuckDBBit
-                            { duckDBBitData = nullPtr
-                            , duckDBBitSize = 0
-                            }
-                    action ptr
-                else
-                    let payload = BS.pack ((fromIntegral padding :: Word8) : BS.unpack bits)
-                     in BS.useAsCStringLen payload \(rawPtr, len) ->
-                            alloca \ptr -> do
-                                poke
-                                    ptr
-                                    DuckDBBit
-                                        { duckDBBitData = castPtr rawPtr
-                                        , duckDBBitSize = fromIntegral len
-                                        }
-                                action ptr
-     in withPacked c_duckdb_create_bit
-
-bigNumDuckValue :: BigNum -> IO DuckDBValue
-bigNumDuckValue (BigNum big) =
-    let neg = fromBool (big < 0)
-        payload =
-            BS.pack $
-                if big < 0
-                    then map complement (drop 3 $ toBigNumBytes big)
-                    else drop 3 $ toBigNumBytes big
-        withPayload action =
-            if BS.null payload
-                then alloca \ptr -> do
-                    poke
-                        ptr
-                        DuckDBBignum
-                            { duckDBBignumData = nullPtr
-                            , duckDBBignumSize = 0
-                            , duckDBBignumIsNegative = neg
-                            }
-                    action ptr
-                else BS.useAsCStringLen payload \(rawPtr, len) ->
-                    alloca \ptr -> do
-                        poke
-                            ptr
-                            DuckDBBignum
-                                { duckDBBignumData = castPtr rawPtr
-                                , duckDBBignumSize = fromIntegral len
-                                , duckDBBignumIsNegative = neg
-                                }
-                        action ptr
-     in withPayload c_duckdb_create_bignum
-
-dayDuckValue :: Day -> IO DuckDBValue
-dayDuckValue day = do
-    duckDate <- encodeDay day
-    c_duckdb_create_date duckDate
-
-timeOfDayDuckValue :: TimeOfDay -> IO DuckDBValue
-timeOfDayDuckValue tod = do
-    duckTime <- encodeTimeOfDay tod
-    c_duckdb_create_time duckTime
-
-localTimeDuckValue :: LocalTime -> IO DuckDBValue
-localTimeDuckValue ts = do
-    duckTimestamp <- encodeLocalTime ts
-    c_duckdb_create_timestamp duckTimestamp
-
-utcTimeDuckValue :: UTCTime -> IO DuckDBValue
-utcTimeDuckValue utcTime =
-    let local = utcToLocalTime utc utcTime
-     in localTimeDuckValue local
-
-
-
-
-encodeDay :: Day -> IO DuckDBDate
-encodeDay day =
-    alloca \ptr -> do
-        poke ptr (dayToDateStruct day)
-        c_duckdb_to_date ptr
-
-encodeTimeOfDay :: TimeOfDay -> IO DuckDBTime
-encodeTimeOfDay tod =
-    alloca \ptr -> do
-        poke ptr (timeOfDayToStruct tod)
-        c_duckdb_to_time ptr
-
-encodeLocalTime :: LocalTime -> IO DuckDBTimestamp
-encodeLocalTime LocalTime{localDay, localTimeOfDay} =
-    alloca \ptr -> do
-        poke
-            ptr
-            DuckDBTimestampStruct
-                { duckDBTimestampStructDate = dayToDateStruct localDay
-                , duckDBTimestampStructTime = timeOfDayToStruct localTimeOfDay
-                }
-        c_duckdb_to_timestamp ptr
-
-dayToDateStruct :: Day -> DuckDBDateStruct
-dayToDateStruct day =
-    let (year, month, dayOfMonth) = toGregorian day
-     in DuckDBDateStruct
-            { duckDBDateStructYear = fromIntegral year
-            , duckDBDateStructMonth = fromIntegral month
-            , duckDBDateStructDay = fromIntegral dayOfMonth
-            }
-
-timeOfDayToStruct :: TimeOfDay -> DuckDBTimeStruct
-timeOfDayToStruct tod =
-    let totalPicoseconds = diffTimeToPicoseconds (timeOfDayToTime tod)
-        totalMicros = totalPicoseconds `div` 1000000
-        (hours, remHour) = totalMicros `divMod` (60 * 60 * 1000000)
-        (minutes, remMinute) = remHour `divMod` (60 * 1000000)
-        (seconds, micros) = remMinute `divMod` 1000000
-     in DuckDBTimeStruct
-            { duckDBTimeStructHour = fromIntegral hours
-            , duckDBTimeStructMinute = fromIntegral minutes
-            , duckDBTimeStructSecond = fromIntegral seconds
-            , duckDBTimeStructMicros = fromIntegral micros
-            }
-
-
-intervalDuckValue :: IntervalValue -> IO DuckDBValue
-intervalDuckValue IntervalValue{intervalMonths, intervalDays, intervalMicros} =
-    alloca \ptr -> do
-        poke ptr (DuckDBInterval intervalMonths intervalDays intervalMicros)
-        c_duckdb_create_interval ptr
-
-timeWithZoneDuckValue :: TimeWithZone -> IO DuckDBValue
-timeWithZoneDuckValue TimeWithZone{timeWithZoneTime, timeWithZoneZone} = do
-    let totalMicros = diffTimeToPicoseconds (timeOfDayToTime timeWithZoneTime) `div` 1000000
-        offsetSeconds = timeZoneMinutes timeWithZoneZone * 60
-    tzValue <- c_duckdb_create_time_tz (fromIntegral totalMicros) (fromIntegral offsetSeconds)
-    c_duckdb_create_time_tz_value tzValue
-
-
-
-----
 
 
 newtype ViaDuckStruct a = ViaDuckStruct a
