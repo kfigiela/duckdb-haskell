@@ -614,5 +614,5 @@ assertSuccess app f = f >>= \case
   DuckDBSuccess -> pure ()
   _errorStatus -> do
         err <- c_duckdb_appender_error_data app >>= c_duckdb_error_data_message >>= peekCString
-        throwIO $ SQLError ("duckdb-simple: appender error" <> Text.pack err) Nothing Nothing -- FIXME: proper error handling
+        throwIO $ appenderError $ Text.pack err
 {-# INLINE assertSuccess #-}

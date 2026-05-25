@@ -62,6 +62,7 @@ import Foreign.Ptr (Ptr, nullPtr)
 import Foreign.Storable (poke)
 import Numeric.Natural (Natural)
 import Database.DuckDB.Simple.Internal.ValueHelpers
+import GHC.Stack (HasCallStack, callStack)
 
 -- | Represents a named parameter binding using the @:=@ operator.
 data NamedParam where
@@ -455,7 +456,7 @@ typeMismatch expected actual =
             )
         )
 
-createElementLogicalType :: forall a. (DuckDBColumnType a) => Proxy a -> IO DuckDBLogicalType
+createElementLogicalType :: HasCallStack => forall a. (DuckDBColumnType a) => Proxy a -> IO DuckDBLogicalType
 createElementLogicalType proxy =
     let typeName = duckdbColumnType proxy
      in case duckDBTypeFromName typeName of
@@ -470,6 +471,7 @@ createElementLogicalType proxy =
                                 ]
                         , sqlErrorType = Nothing
                         , sqlErrorQuery = Nothing
+                        , sqlErrorCallStack = callStack
                         }
                     )
 
@@ -623,4 +625,5 @@ throwBindError Statement{statementQuery} msg =
             { sqlErrorMessage = msg
             , sqlErrorType = Nothing
             , sqlErrorQuery = Just statementQuery
+            , sqlErrorCallStack = callStack
             }
