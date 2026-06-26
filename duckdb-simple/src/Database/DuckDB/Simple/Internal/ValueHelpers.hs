@@ -1,5 +1,6 @@
 {-# LANGUAGE BlockArguments #-}
 {-# LANGUAGE NamedFieldPuns #-}
+{-# LANGUAGE PatternSynonyms #-}
 
 module Database.DuckDB.Simple.Internal.ValueHelpers where
 
@@ -7,8 +8,9 @@ import qualified Data.ByteString as BS
 import Data.Int (Int16, Int32, Int64, Int8)
 import Data.Text (Text)
 import qualified Data.Text as Text
-import Data.Time (UTCTime, LocalTime (..), toGregorian, diffTimeToPicoseconds, timeOfDayToTime, TimeZone (timeZoneMinutes), utcToLocalTime, utc)
+import Data.Time (UTCTime, LocalTime (..), toGregorian, diffTimeToPicoseconds, timeOfDayToTime, TimeZone (timeZoneMinutes), utcToLocalTime, utc, pattern YearMonthDay)
 import qualified Data.Text.Foreign as TextForeign
+import Control.Monad (forM)
 
 import Data.Time.Calendar (Day)
 import Data.Time.LocalTime (TimeOfDay)
@@ -158,7 +160,7 @@ bigNumDuckValue (BigNum big) =
 dayDuckValue :: Day -> IO DuckDBValue
 dayDuckValue day = do
     duckDate <- encodeDay day
-    c_duckdb_create_date duckDate
+    maybe c_duckdb_create_null_value c_duckdb_create_date duckDate
 
 timeOfDayDuckValue :: TimeOfDay -> IO DuckDBValue
 timeOfDayDuckValue tod = do
@@ -168,17 +170,17 @@ timeOfDayDuckValue tod = do
 localTimeDuckValue :: LocalTime -> IO DuckDBValue
 localTimeDuckValue ts = do
     duckTimestamp <- encodeLocalTime ts
-    c_duckdb_create_timestamp duckTimestamp
+    maybe c_duckdb_create_null_value c_duckdb_create_timestamp duckTimestamp
 
 utcTimeDuckValue :: UTCTime -> IO DuckDBValue
 utcTimeDuckValue utcTime =
     let local = utcToLocalTime utc utcTime
      in localTimeDuckValue local
 
-encodeDay :: Day -> IO DuckDBDate
-encodeDay day =
+encodeDay :: Day -> IO (Maybe DuckDBDate)
+encodeDay day = forM (dayToDateStruct day) $ \dayStruct ->
     alloca \ptr -> do
-        poke ptr (dayToDateStruct day)
+        poke ptr dayStruct
         c_duckdb_to_date ptr
 
 encodeTimeOfDay :: TimeOfDay -> IO DuckDBTime
@@ -187,21 +189,24 @@ encodeTimeOfDay tod =
         poke ptr (timeOfDayToStruct tod)
         c_duckdb_to_time ptr
 
-encodeLocalTime :: LocalTime -> IO DuckDBTimestamp
+encodeLocalTime :: LocalTime -> IO (Maybe DuckDBTimestamp)
 encodeLocalTime LocalTime{localDay, localTimeOfDay} =
-    alloca \ptr -> do
-        poke
-            ptr
-            DuckDBTimestampStruct
-                { duckDBTimestampStructDate = dayToDateStruct localDay
-                , duckDBTimestampStructTime = timeOfDayToStruct localTimeOfDay
-                }
-        c_duckdb_to_timestamp ptr
+    forM (dayToDateStruct localDay) $ \dayStruct ->
+        alloca \ptr -> do
+            poke
+                ptr
+                DuckDBTimestampStruct
+                    { duckDBTimestampStructDate = dayStruct
+                    , duckDBTimestampStructTime = timeOfDayToStruct localTimeOfDay
+                    }
+            c_duckdb_to_timestamp ptr
 
-dayToDateStruct :: Day -> DuckDBDateStruct
+dayToDateStruct :: Day -> Maybe DuckDBDateStruct
+dayToDateStruct day | day < YearMonthDay (-5877642) 06 25 = Nothing
+dayToDateStruct day | day > YearMonthDay 5881580 07 10 = Nothing
 dayToDateStruct day =
     let (year, month, dayOfMonth) = toGregorian day
-     in DuckDBDateStruct
+     in Just $ DuckDBDateStruct
             { duckDBDateStructYear = fromIntegral year
             , duckDBDateStructMonth = fromIntegral month
             , duckDBDateStructDay = fromIntegral dayOfMonth
